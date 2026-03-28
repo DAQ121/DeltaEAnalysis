@@ -74,56 +74,52 @@ def extract_roi(image):
 
 
 def extract_reference_color(roi_image, roi_mask, reference_ratio=0.3, fill_holes=True):
-    """步骤2: 提取参考色（多区域采样 + 方差筛选）"""
+    """步骤2: 提取参考色（CLAHE增强 + K-means聚类）"""
     h, w = roi_image.shape[:2]
-
-    # 保存原始图像
     roi_original = roi_image.copy()
 
-    # 将试纸分成3×3网格
-    grid_rows, grid_cols = 3, 3
-    cell_h = h // grid_rows
-    cell_w = w // grid_cols
+    # CLAHE光照校正
+    lab = cv2.cvtColor(roi_original, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_enhanced = clahe.apply(l)
+    enhanced = cv2.merge([l_enhanced, a, b])
+    roi_enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
 
-    best_region = None
-    min_variance = float('inf')
-    best_color = None
+    # 提取掩码内的像素用于聚类
+    valid_pixels = roi_enhanced[roi_mask > 0].reshape(-1, 3).astype(np.float32)
 
-    # 遍历每个区域
-    for i in range(grid_rows):
-        for j in range(grid_cols):
-            y1, y2 = i * cell_h, (i + 1) * cell_h
-            x1, x2 = j * cell_w, (j + 1) * cell_w
-
-            region = roi_original[y1:y2, x1:x2]
-            region_mask = roi_mask[y1:y2, x1:x2]
-
-            # 只计算掩码内的像素
-            valid_pixels = region[region_mask > 0]
-
-            if len(valid_pixels) < 10:
-                continue
-
-            # 计算平均亮度（灰度值）
-            gray_mean = np.mean(cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)[region_mask > 0])
-            variance = np.var(valid_pixels)
-
-            # 选择亮度高且方差小的区域（偏白色）
-            if gray_mean > 150 and variance < min_variance:
-                min_variance = variance
-                best_region = (y1, y2, x1, x2)
-                best_color = np.mean(valid_pixels, axis=0)
-
-    # 如果没找到合适区域，使用默认值
-    if best_region is None:
-        ref_bgr_mean = np.array([128, 128, 128])
-        lab_mean = np.array([50, 0, 0])
+    if len(valid_pixels) < 100:
+        ref_bgr_mean = np.array([200, 200, 200])
+        lab_mean = np.array([80, 0, 0])
+        best_region = None
     else:
-        ref_bgr_mean = best_color
+        # K-means聚类（K=2：正常区域 vs 变色区域）
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
+        _, labels, centers = cv2.kmeans(valid_pixels, 2, None, criteria, 10, cv2.KMEANS_PP_CENTERS)
+
+        # 选择亮度更高（偏白色）的类作为正常区域
+        center_gray_0 = cv2.cvtColor(np.uint8([[centers[0]]]), cv2.COLOR_BGR2GRAY)[0, 0]
+        center_gray_1 = cv2.cvtColor(np.uint8([[centers[1]]]), cv2.COLOR_BGR2GRAY)[0, 0]
+
+        normal_label = 0 if center_gray_0 > center_gray_1 else 1
+        ref_bgr_mean = centers[normal_label]
+
         # 转换为LAB
         ref_rgb = cv2.cvtColor(np.uint8([[ref_bgr_mean]]), cv2.COLOR_BGR2RGB)
         ref_lab = color.rgb2lab(ref_rgb / 255.0)
         lab_mean = ref_lab[0, 0]
+
+        # 找到正常区域的代表性位置用于可视化
+        normal_mask = np.zeros(roi_mask.shape, dtype=np.uint8)
+        normal_mask[roi_mask > 0] = (labels.flatten() == normal_label).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(normal_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            largest = max(contours, key=cv2.contourArea)
+            x, y, w_box, h_box = cv2.boundingRect(largest)
+            best_region = (y, min(y + h_box, h), x, min(x + w_box, w))
+        else:
+            best_region = None
 
     # 找到黑洞并用参考色填充（可选）
     roi_filled = roi_original.copy()
