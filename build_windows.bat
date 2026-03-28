@@ -1,18 +1,18 @@
 @echo off
 echo ========================================
-echo 试纸色差检测系统 - Windows打包脚本
+echo Test Strip Color Detection System - Build Script
 echo ========================================
 echo.
 
-echo [1/3] 安装PyInstaller...
+echo [1/3] Installing PyInstaller...
 pip install pyinstaller
 
 echo.
-echo [2/3] 开始打包...
+echo [2/3] Building executable...
 pyinstaller build.spec
 
 echo.
-echo [3/3] 整理发布文件...
+echo [3/3] Organizing release files...
 if exist release rmdir /s /q release
 mkdir release
 copy "dist\试纸色差检测系统.exe" release\
@@ -21,7 +21,7 @@ copy 使用说明.txt release\
 
 echo.
 echo ========================================
-echo 打包完成！
-echo 发布文件位于: release\
+echo Build completed!
+echo Release files in: release\
 echo ========================================
 pause
