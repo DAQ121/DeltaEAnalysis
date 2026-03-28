@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo Test Strip Color Detection System - Build Script
+echo Build Script
 echo ========================================
 echo.
 
@@ -15,9 +15,9 @@ echo.
 echo [3/3] Organizing release files...
 if exist release rmdir /s /q release
 mkdir release
-copy "dist\试纸色差检测系统.exe" release\
+xcopy "dist\*.exe" release\ /Y
 xcopy frontend release\frontend\ /E /I /Y
-copy 使用说明.txt release\
+copy *.txt release\ /Y
 
 echo.
 echo ========================================
