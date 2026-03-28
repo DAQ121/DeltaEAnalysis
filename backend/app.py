@@ -14,8 +14,10 @@ def analyze():
         threshold = data.get('threshold', 10)
         grid_size = data.get('grid_size', 20)
         reference_ratio = data.get('reference_ratio', 0.15)
+        manual_lab = data.get('manual_lab', None)
+        fill_holes = data.get('fill_holes', True)
 
-        result = analyze_image(image_data, threshold, grid_size, reference_ratio)
+        result = analyze_image(image_data, threshold, grid_size, reference_ratio, manual_lab, fill_holes)
         return jsonify(result)
 
     except Exception as e:

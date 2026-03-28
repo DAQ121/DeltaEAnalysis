@@ -13,9 +13,15 @@ function initEventListeners() {
     const uploadArea = document.getElementById('upload-area');
     const fileInput = document.getElementById('file-input');
     const analyzeBtn = document.getElementById('analyze-btn');
+    const referenceMode = document.getElementById('reference-mode');
+    const manualLab = document.getElementById('manual-lab');
 
     thresholdInput.addEventListener('input', (e) => {
         thresholdValue.textContent = e.target.value;
+    });
+
+    referenceMode.addEventListener('change', (e) => {
+        manualLab.style.display = e.target.value === 'manual' ? 'block' : 'none';
     });
 
     uploadArea.addEventListener('click', () => fileInput.click());
@@ -66,6 +72,23 @@ async function startAnalysis() {
 
     const threshold = parseInt(document.getElementById('threshold').value);
     const gridSize = parseInt(document.getElementById('grid-size').value);
+    const referenceMode = document.getElementById('reference-mode').value;
+
+    let requestData = {
+        image: uploadedImage,
+        threshold: threshold,
+        grid_size: gridSize,
+        reference_ratio: 0.15,
+        fill_holes: document.getElementById('fill-holes').checked
+    };
+
+    if (referenceMode === 'manual') {
+        requestData.manual_lab = [
+            parseFloat(document.getElementById('lab-l').value),
+            parseFloat(document.getElementById('lab-a').value),
+            parseFloat(document.getElementById('lab-b').value)
+        ];
+    }
 
     document.getElementById('loading').style.display = 'block';
     document.getElementById('analyze-btn').disabled = true;
@@ -76,12 +99,7 @@ async function startAnalysis() {
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                image: uploadedImage,
-                threshold: threshold,
-                grid_size: gridSize,
-                reference_ratio: 0.15
-            })
+            body: JSON.stringify(requestData)
         });
 
         const result = await response.json();

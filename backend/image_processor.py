@@ -73,7 +73,7 @@ def extract_roi(image):
     }
 
 
-def extract_reference_color(roi_image, roi_mask, reference_ratio=0.3):
+def extract_reference_color(roi_image, roi_mask, reference_ratio=0.3, fill_holes=True):
     """步骤2: 提取参考色（多区域采样 + 方差筛选）"""
     h, w = roi_image.shape[:2]
 
@@ -104,11 +104,12 @@ def extract_reference_color(roi_image, roi_mask, reference_ratio=0.3):
             if len(valid_pixels) < 10:
                 continue
 
-            # 计算颜色方差
+            # 计算平均亮度（灰度值）
+            gray_mean = np.mean(cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)[region_mask > 0])
             variance = np.var(valid_pixels)
 
-            # 选择方差最小的区域
-            if variance < min_variance:
+            # 选择亮度高且方差小的区域（偏白色）
+            if gray_mean > 150 and variance < min_variance:
                 min_variance = variance
                 best_region = (y1, y2, x1, x2)
                 best_color = np.mean(valid_pixels, axis=0)
@@ -124,36 +125,37 @@ def extract_reference_color(roi_image, roi_mask, reference_ratio=0.3):
         ref_lab = color.rgb2lab(ref_rgb / 255.0)
         lab_mean = ref_lab[0, 0]
 
-    # 找到黑洞并用参考色填充
-    gray_roi = cv2.cvtColor(roi_original, cv2.COLOR_BGR2GRAY)
-    _, hole_mask = cv2.threshold(gray_roi, 50, 255, cv2.THRESH_BINARY_INV)
-    hole_mask = cv2.bitwise_and(hole_mask, roi_mask)
-
-    # 找到黑洞轮廓
-    contours, _ = cv2.findContours(hole_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
+    # 找到黑洞并用参考色填充（可选）
     roi_filled = roi_original.copy()
 
-    if contours:
-        for contour in contours:
-            # 获取轮廓的中心和边界框
-            M = cv2.moments(contour)
-            if M["m00"] > 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
+    if fill_holes:
+        gray_roi = cv2.cvtColor(roi_original, cv2.COLOR_BGR2GRAY)
+        _, hole_mask = cv2.threshold(gray_roi, 50, 255, cv2.THRESH_BINARY_INV)
+        hole_mask = cv2.bitwise_and(hole_mask, roi_mask)
 
-                # 获取轮廓的最大尺寸
-                x, y, w_box, h_box = cv2.boundingRect(contour)
-                max_size = max(w_box, h_box)
+        # 找到黑洞轮廓
+        contours, _ = cv2.findContours(hole_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-                # 以中心为基准，填充正方形区域
-                half_size = max_size // 2 + 60  # 扩大60像素
-                y1 = max(0, cy - half_size)
-                y2 = min(h, cy + half_size)
-                x1 = max(0, cx - half_size)
-                x2 = min(w, cx + half_size)
+        if contours:
+            for contour in contours:
+                # 获取轮廓的中心和边界框
+                M = cv2.moments(contour)
+                if M["m00"] > 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
 
-                roi_filled[y1:y2, x1:x2] = ref_bgr_mean
+                    # 获取轮廓的最大尺寸
+                    x, y, w_box, h_box = cv2.boundingRect(contour)
+                    max_size = max(w_box, h_box)
+
+                    # 以中心为基准，填充正方形区域
+                    half_size = max_size // 2 + 60  # 扩大60像素
+                    y1 = max(0, cy - half_size)
+                    y2 = min(h, cy + half_size)
+                    x1 = max(0, cx - half_size)
+                    x2 = min(w, cx + half_size)
+
+                    roi_filled[y1:y2, x1:x2] = ref_bgr_mean
 
     # 可视化：标注选中的区域
     roi_with_box = roi_filled.copy()
@@ -168,7 +170,8 @@ def extract_reference_color(roi_image, roi_mask, reference_ratio=0.3):
         "roi_with_reference": roi_with_box,
         "reference_color_block": ref_color_block,
         "reference_region": ref_color_block,
-        "roi_filled": roi_filled
+        "roi_filled": roi_filled,
+        "ref_bgr_mean": ref_bgr_mean  # 返回参考色BGR值
     }
 
 
@@ -195,6 +198,48 @@ def divide_into_grid(roi_image, grid_size):
         "grid_size": [grid_h, grid_w],
         "cell_size": cell_size
     }
+
+
+def fill_outer_border(roi_image, roi_mask, ref_bgr_mean, grid_size, border_width=2):
+    """填充ROI最外围的网格为参考色"""
+    h, w = roi_image.shape[:2]
+    min_dim = min(h, w)
+    cell_size = min_dim // grid_size
+
+    roi_filled = roi_image.copy()
+
+    # 填充外围border_width圈网格
+    border_pixels = cell_size * border_width
+
+    # 上边界
+    roi_filled[0:border_pixels, :] = np.where(
+        roi_mask[0:border_pixels, :, np.newaxis] > 0,
+        ref_bgr_mean,
+        roi_filled[0:border_pixels, :]
+    )
+
+    # 下边界
+    roi_filled[h-border_pixels:h, :] = np.where(
+        roi_mask[h-border_pixels:h, :, np.newaxis] > 0,
+        ref_bgr_mean,
+        roi_filled[h-border_pixels:h, :]
+    )
+
+    # 左边界
+    roi_filled[:, 0:border_pixels] = np.where(
+        roi_mask[:, 0:border_pixels, np.newaxis] > 0,
+        ref_bgr_mean,
+        roi_filled[:, 0:border_pixels]
+    )
+
+    # 右边界
+    roi_filled[:, w-border_pixels:w] = np.where(
+        roi_mask[:, w-border_pixels:w, np.newaxis] > 0,
+        ref_bgr_mean,
+        roi_filled[:, w-border_pixels:w]
+    )
+
+    return roi_filled
 
 
 def calculate_delta_e_pixelwise(roi_image, roi_mask, ref_lab):
@@ -366,15 +411,38 @@ def detect_color_change(roi_image, delta_e_matrix, threshold, grid_data):
     }
 
 
-def analyze_image(image_data, threshold=10, grid_size=20, reference_ratio=0.15):
+def analyze_image(image_data, threshold=10, grid_size=20, reference_ratio=0.15, manual_lab=None, fill_holes=True):
     """主分析函数"""
     image = decode_image(image_data)
 
     roi_data = extract_roi(image)
-    ref_data = extract_reference_color(roi_data["roi_image"], roi_data["roi_mask"], reference_ratio)
+
+    if manual_lab:
+        # 使用手动指定的LAB值
+        ref_lab = np.array(manual_lab)
+        # 转换为BGR用于填充
+        ref_rgb = color.lab2rgb(np.array([[ref_lab]]))
+        ref_bgr = cv2.cvtColor((ref_rgb * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)[0, 0]
+
+        roi_filled = roi_data["roi_image"].copy()
+        ref_color_block = np.full((100, 100, 3), ref_bgr, dtype=np.uint8)
+
+        ref_data = {
+            "lab_values": manual_lab,
+            "roi_with_reference": roi_filled,
+            "reference_color_block": ref_color_block,
+            "roi_filled": roi_filled,
+            "ref_bgr_mean": ref_bgr
+        }
+    else:
+        # 自动识别参考色
+        ref_data = extract_reference_color(roi_data["roi_image"], roi_data["roi_mask"], reference_ratio, fill_holes)
 
     # 使用填充后的图像进行后续处理
     roi_filled = ref_data["roi_filled"]
+
+    # 填充最外围两圈网格为参考色
+    roi_filled = fill_outer_border(roi_filled, roi_data["roi_mask"], ref_data["ref_bgr_mean"], grid_size, border_width=2)
 
     grid_data = divide_into_grid(roi_filled, grid_size)
     delta_e_data = calculate_delta_e(roi_filled, roi_data["roi_mask"], np.array(ref_data["lab_values"]), grid_data)
