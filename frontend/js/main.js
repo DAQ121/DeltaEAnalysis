@@ -1,67 +1,71 @@
 const API_URL = 'http://localhost:5002/api/analyze';
 
 let uploadedImage = null;
+let analysisResult = null;
+let activeStep = 0;
 
-// 初始化
+const STEP_KEYS = [
+    'step1_roi_extraction',
+    'step2_crop',
+    'step3_split',
+    'step5_color_change'
+];
+
+const IMG_LABELS = {
+    binary: '二值化',
+    contours: '轮廓检测',
+    roi: 'ROI 区域',
+    hole_detection: '黑洞定位',
+    cropped: '裁剪结果',
+    split_view: '左右分割',
+    grid_overlay: '网格划分',
+    heatmap: '色差热力图',
+    highlighted_area: '变色标注'
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     initEventListeners();
 });
 
 function initEventListeners() {
     const thresholdInput = document.getElementById('threshold');
-    const thresholdValue = document.getElementById('threshold-value');
     const uploadArea = document.getElementById('upload-area');
     const fileInput = document.getElementById('file-input');
-    const analyzeBtn = document.getElementById('analyze-btn');
-    const referenceMode = document.getElementById('reference-mode');
-    const manualLab = document.getElementById('manual-lab');
+    const previewBox = document.getElementById('preview');
 
     thresholdInput.addEventListener('input', (e) => {
-        thresholdValue.textContent = e.target.value;
-    });
-
-    referenceMode.addEventListener('change', (e) => {
-        manualLab.style.display = e.target.value === 'manual' ? 'block' : 'none';
+        document.getElementById('threshold-value').textContent = e.target.value;
     });
 
     uploadArea.addEventListener('click', () => fileInput.click());
+    previewBox.addEventListener('click', () => fileInput.click());
 
     uploadArea.addEventListener('dragover', (e) => {
         e.preventDefault();
         uploadArea.classList.add('dragover');
     });
-
-    uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('dragover');
-    });
-
+    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
     uploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
         uploadArea.classList.remove('dragover');
         const file = e.dataTransfer.files[0];
-        if (file && file.type.startsWith('image/')) {
-            handleImageUpload(file);
-        }
+        if (file && file.type.startsWith('image/')) handleImageUpload(file);
     });
 
     fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            handleImageUpload(file);
-        }
+        if (e.target.files[0]) handleImageUpload(e.target.files[0]);
     });
 
-    analyzeBtn.addEventListener('click', startAnalysis);
+    document.getElementById('analyze-btn').addEventListener('click', startAnalysis);
 }
 
 function handleImageUpload(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
         uploadedImage = e.target.result;
-        const preview = document.getElementById('preview');
-        const originalImage = document.getElementById('original-image');
-        originalImage.src = uploadedImage;
-        preview.style.display = 'block';
+        document.getElementById('original-image').src = uploadedImage;
+        document.getElementById('upload-area').style.display = 'none';
+        document.getElementById('preview').style.display = 'block';
         document.getElementById('analyze-btn').disabled = false;
     };
     reader.readAsDataURL(file);
@@ -72,45 +76,31 @@ async function startAnalysis() {
 
     const threshold = parseInt(document.getElementById('threshold').value);
     const gridSize = parseInt(document.getElementById('grid-size').value);
-    const referenceMode = document.getElementById('reference-mode').value;
-
-    let requestData = {
-        image: uploadedImage,
-        threshold: threshold,
-        grid_size: gridSize,
-        reference_ratio: 0.15,
-        fill_holes: document.getElementById('fill-holes').checked
-    };
-
-    if (referenceMode === 'manual') {
-        requestData.manual_lab = [
-            parseFloat(document.getElementById('lab-l').value),
-            parseFloat(document.getElementById('lab-a').value),
-            parseFloat(document.getElementById('lab-b').value)
-        ];
-    }
 
     document.getElementById('loading').style.display = 'block';
     document.getElementById('analyze-btn').disabled = true;
     document.getElementById('visualization').style.display = 'none';
     document.getElementById('result-section').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'none';
 
     try {
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestData)
+            body: JSON.stringify({ image: uploadedImage, threshold, grid_size: gridSize })
         });
-
         const result = await response.json();
 
         if (result.success) {
+            analysisResult = result;
             displayResults(result);
         } else {
             alert('分析失败: ' + result.error);
+            document.getElementById('empty-state').style.display = 'flex';
         }
     } catch (error) {
         alert('请求失败: ' + error.message);
+        document.getElementById('empty-state').style.display = 'flex';
     } finally {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('analyze-btn').disabled = false;
@@ -118,89 +108,131 @@ async function startAnalysis() {
 }
 
 function displayResults(result) {
-    displaySteps(result.steps);
-    displayFinalResults(result.final_results);
+    buildStepper(result.steps);
+    showStep(0);
+    document.getElementById('visualization').style.display = 'flex';
+    displayResultCards(result.final_results);
+    document.getElementById('result-section').style.display = 'grid';
 }
 
-function displaySteps(steps) {
-    const container = document.getElementById('steps-container');
-    container.innerHTML = '';
-
-    const stepOrder = [
-        'step1_roi_extraction',
-        'step2_reference_color',
-        'step3_grid_division',
-        'step4_delta_e_calculation',
-        'step5_color_change_detection'
-    ];
-
-    stepOrder.forEach((stepKey, index) => {
-        const step = steps[stepKey];
-        if (!step) return;
-
-        setTimeout(() => {
-            const stepCard = createStepCard(step);
-            container.appendChild(stepCard);
-        }, index * 300);
-    });
-
-    document.getElementById('visualization').style.display = 'block';
+function displayResultCards(r) {
+    const fmtLab = (arr) => `
+        <div class="lab-row"><span class="lab-ch">L：</span><span class="lab-num">${arr[0]}</span></div>
+        <div class="lab-row"><span class="lab-ch">a：</span><span class="lab-num">${arr[1]}</span></div>
+        <div class="lab-row"><span class="lab-ch">b：</span><span class="lab-num">${arr[2]}</span></div>`;
+    document.getElementById('left-lab-value').innerHTML = fmtLab(r.left_lab);
+    document.getElementById('right-lab-value').innerHTML = fmtLab(r.right_lab);
+    document.getElementById('delta-e-value').textContent = r.overall_delta_e.toFixed(2);
+    document.getElementById('ratio-value').textContent = (r.color_change_ratio * 100).toFixed(1) + '%';
+    document.getElementById('ratio-label').textContent =
+        `${r.changed_cells} / ${r.total_cells} 格超过阈值 ${r.threshold_used}`;
 }
 
-function createStepCard(step) {
-    const card = document.createElement('div');
-    card.className = 'step-card';
+function buildStepper(steps) {
+    const stepper = document.getElementById('stepper');
+    stepper.innerHTML = '';
 
-    const title = document.createElement('h3');
-    title.textContent = step.title;
-    card.appendChild(title);
+    // 只取实际存在的步骤，重新建连续下标映射
+    const validSteps = STEP_KEYS.filter(key => steps[key]);
 
-    const desc = document.createElement('p');
-    desc.textContent = step.description;
-    card.appendChild(desc);
+    validSteps.forEach((key, i) => {
+        const step = steps[key];
 
-    Object.values(step.images).forEach(imgBase64 => {
-        const img = document.createElement('img');
-        img.src = 'data:image/png;base64,' + imgBase64;
-        card.appendChild(img);
+        const node = document.createElement('div');
+        node.className = 'step-node';
+        node.dataset.index = i;
+        node.innerHTML = `
+            <div class="step-dot-wrap">
+                <div class="step-dot" id="dot-${i}">${i + 1}</div>
+                <div class="step-label">${step.title}</div>
+            </div>`;
+        node.addEventListener('click', () => showStep(i));
+        stepper.appendChild(node);
+
+        if (i < validSteps.length - 1) {
+            const conn = document.createElement('div');
+            conn.className = 'step-connector';
+            conn.id = `conn-${i}`;
+            stepper.appendChild(conn);
+        }
     });
 
-    if (step.data) {
-        const dataDiv = document.createElement('div');
-        dataDiv.style.fontSize = '0.85em';
-        dataDiv.style.color = '#666';
-        dataDiv.style.marginTop = '10px';
-        dataDiv.textContent = JSON.stringify(step.data, null, 2);
-        card.appendChild(dataDiv);
+    // 保存有效步骤列表供 showStep 使用
+    window._validStepKeys = validSteps;
+}
+
+function showStep(index) {
+    activeStep = index;
+    const steps = analysisResult.steps;
+    const keys = window._validStepKeys || STEP_KEYS;
+
+    // 更新步骤条状态
+    keys.forEach((_, i) => {
+        const dot = document.getElementById(`dot-${i}`);
+        const node = dot?.closest('.step-node');
+        if (!dot) return;
+        dot.className = 'step-dot' + (i < index ? ' done' : i === index ? ' active' : '');
+        node.className = 'step-node' + (i === index ? ' active' : i < index ? ' done' : '');
+        if (i < keys.length - 1) {
+            const conn = document.getElementById(`conn-${i}`);
+            if (conn) conn.className = 'step-connector' + (i < index ? ' done' : '');
+        }
+    });
+
+    // 渲染步骤内容
+    const step = steps[keys[index]];
+    if (!step) return;
+
+    const imagesHtml = Object.entries(step.images).map(([key, b64]) => `
+        <div class="step-img-wrap">
+            <img src="data:image/png;base64,${b64}" alt="${IMG_LABELS[key] || key}">
+            <div class="step-img-label">${IMG_LABELS[key] || key}</div>
+        </div>`).join('');
+
+    const dataHtml = buildDataHtml(step.data);
+
+    const prevBtn = index > 0
+        ? `<button class="step-nav-btn" onclick="showStep(${index - 1})">← 上一步</button>` : '';
+    const nextBtn = index < keys.length - 1
+        ? `<button class="step-nav-btn primary" onclick="showStep(${index + 1})">下一步 →</button>` : '';
+
+    document.getElementById('step-content').innerHTML = `
+        <div class="step-content-inner">
+            <div class="step-content-header">
+                <h3>${step.title}</h3>
+                <p>${step.description}</p>
+            </div>
+            ${imagesHtml ? `<div class="step-images">${imagesHtml}</div>` : ''}
+            ${dataHtml ? `<div class="step-data-box">${dataHtml}</div>` : ''}
+            <div class="step-nav">${prevBtn}${nextBtn}</div>
+        </div>`;
+}
+
+function buildDataHtml(data) {
+    if (!data) return '';
+    const labKeys = ['left_lab', 'right_lab'];
+
+    // step3: LAB 均值 + 整体 ΔE
+    if ('delta_e' in data && 'formula' in data) {
+        const fmtLab = (arr) => `L ${arr[0]} / a ${arr[1]} / b ${arr[2]}`;
+        return `
+            <div class="data-row"><span class="data-key">公式</span><span class="data-val highlight">${data.formula}</span></div>
+            <div class="data-row"><span class="data-key">左侧 LAB（基准）</span><span class="data-val highlight">${fmtLab(data.left_lab)}</span></div>
+            <div class="data-row"><span class="data-key">右侧 LAB</span><span class="data-val highlight">${fmtLab(data.right_lab)}</span></div>
+            <div class="data-row"><span class="data-key">整体 ΔE</span><span class="data-val" style="font-size:1.4em;color:var(--orange)">${data.delta_e}</span></div>`;
     }
 
-    return card;
+    // step5: 最终比例
+    if ('ratio' in data) {
+        return `
+            <div class="data-row"><span class="data-key">阈值</span><span class="data-val">ΔE > ${data.threshold}</span></div>
+            <div class="data-row"><span class="data-key">超阈值网格</span><span class="data-val">${data.changed_cells} / ${data.total_cells}</span></div>
+            <div class="data-row"><span class="data-key">变色比例</span><span class="data-val" style="font-size:1.4em;color:var(--red)">${data.ratio}%</span></div>`;
+    }
+
+    return Object.entries(data).map(([k, v]) => {
+        let val = Array.isArray(v) ? (labKeys.includes(k) ? `L=${v[0]}  a=${v[1]}  b=${v[2]}` : JSON.stringify(v)) : v;
+        const isHighlight = labKeys.includes(k);
+        return `<div class="data-row"><span class="data-key">${k}</span><span class="data-val${isHighlight ? ' highlight' : ''}">${val}</span></div>`;
+    }).join('');
 }
-
-function displayFinalResults(results) {
-    setTimeout(() => {
-        document.getElementById('delta-e-value').textContent = results.changed_area_delta_e.toFixed(2);
-        document.getElementById('ratio-value').textContent = (results.color_change_ratio * 100).toFixed(1) + '%';
-
-        const statusDiv = document.getElementById('result-status');
-        const statusText = document.getElementById('status-text');
-        const statusDesc = document.getElementById('status-desc');
-
-        if (results.experiment_success) {
-            statusDiv.className = 'result-status success';
-            statusText.textContent = '✓ 实验成功';
-            statusDesc.textContent = `色差值超过设定阈值 (${results.threshold_used})`;
-        } else {
-            statusDiv.className = 'result-status failure';
-            statusText.textContent = '✗ 实验失败';
-            statusDesc.textContent = `色差值未达到设定阈值 (${results.threshold_used})`;
-        }
-
-        document.getElementById('result-section').style.display = 'block';
-    }, 1500);
-}
-
-
-
-
-
