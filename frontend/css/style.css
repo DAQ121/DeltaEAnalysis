@@ -24,6 +24,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 /* ===== App Layout ===== */
 .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
+/* ===== Tab Panel fills remaining height ===== */
+.tab-panel { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
 /* ===== Header ===== */
 .app-header {
     background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #4f46e5 100%);
@@ -226,3 +229,167 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 /* ΔE Matrix Table */
 .de-matrix { border-collapse: collapse; font-size: .75em; font-family: 'SF Mono', 'Fira Code', monospace; }
 .de-matrix td { padding: 3px 6px; text-align: center; border: 1px solid var(--border); min-width: 42px; }
+
+/* ===== Tab Bar ===== */
+.tab-bar {
+    display: flex; gap: 4px; padding: 0 32px;
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #4f46e5 100%);
+    flex-shrink: 0;
+}
+.tab-btn {
+    padding: 8px 20px; border: none; background: transparent;
+    color: rgba(255,255,255,.6); font-size: .9em; font-weight: 500;
+    cursor: pointer; border-bottom: 3px solid transparent; transition: all .2s;
+}
+.tab-btn:hover { color: rgba(255,255,255,.9); }
+.tab-btn.active { color: white; border-bottom-color: white; }
+
+/* ===== Text Input ===== */
+.text-input {
+    width: 100%; padding: 8px 12px; border: 1.5px solid var(--border);
+    border-radius: 8px; font-size: .85em; outline: none; transition: border-color .2s;
+    font-family: 'SF Mono', 'Fira Code', monospace; color: var(--text);
+}
+.text-input:focus { border-color: var(--blue); }
+
+/* ===== Stop Button ===== */
+.stop-btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; padding: 13px; background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white; border: none; border-radius: var(--radius); font-size: 1em; font-weight: 600;
+    cursor: pointer; transition: opacity .2s;
+}
+.stop-btn:hover { opacity: .9; }
+
+/* ===== Stream Status Bar ===== */
+.stream-status {
+    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow);
+    flex-shrink: 0; font-size: .9em;
+}
+.status-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.status-dot.running { background: var(--green); box-shadow: 0 0 0 3px rgba(16,185,129,.2); animation: pulse 1.5s infinite; }
+.status-dot.stopped { background: var(--text-3); }
+.status-dot.completed { background: var(--green); }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(16,185,129,.2); } 50% { box-shadow: 0 0 0 6px rgba(16,185,129,.1); } }
+.status-count { margin-left: auto; color: var(--text-2); font-size: .85em; }
+
+/* 状态栏内联按钮 */
+.view-result-btn-inline {
+    margin-left: 12px; padding: 5px 14px; border: 1.5px solid var(--green);
+    border-radius: 6px; background: white; color: var(--green); font-size: .8em;
+    font-weight: 600; cursor: pointer; transition: all .2s;
+}
+.view-result-btn-inline:hover { background: var(--green); color: white; }
+
+/* ===== Stream Preview ===== */
+.stream-preview {
+    flex-shrink: 0; background: #000; border-radius: var(--radius);
+    box-shadow: var(--shadow); overflow: hidden; height: 240px;
+    display: flex; align-items: center; justify-content: center;
+}
+.stream-preview canvas { max-width: 100%; max-height: 100%; display: block; }
+
+/* ===== Stream Timeline ===== */
+.stream-timeline-wrap {
+    flex: 1; overflow: hidden; background: var(--surface);
+    border-radius: var(--radius); box-shadow: var(--shadow); min-height: 0;
+}
+.stream-timeline {
+    display: flex; gap: 12px; padding: 16px;
+    overflow-x: auto; height: 100%; align-items: flex-start;
+    scroll-behavior: smooth;
+}
+.stream-timeline::-webkit-scrollbar { height: 6px; }
+.stream-timeline::-webkit-scrollbar-track { background: var(--bg); border-radius: 3px; }
+.stream-timeline::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ===== Frame Card ===== */
+.frame-card {
+    flex-shrink: 0; width: 160px; background: var(--bg); border-radius: 10px;
+    border: 2px solid var(--border); overflow: hidden; display: flex; flex-direction: column;
+    transition: border-color .2s; animation: fadeUp .3s ease both;
+}
+.frame-card:hover { border-color: var(--blue); }
+.frame-card.changed { border-color: var(--green); background: #f0fdf4; }
+.frame-card.error-card { border-color: var(--border); opacity: .6; }
+
+.frame-thumb-wrap { position: relative; width: 100%; aspect-ratio: 4/3; overflow: hidden; background: #000; }
+.frame-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.frame-changed-badge {
+    position: absolute; top: 6px; right: 6px; background: var(--green); color: white;
+    font-size: .7em; font-weight: 700; padding: 2px 7px; border-radius: 10px;
+}
+.error-thumb {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-3); font-size: .8em; background: var(--bg);
+}
+
+.frame-time {
+    padding: 6px 10px 2px; font-size: .75em; font-weight: 700;
+    color: var(--text-2); font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.frame-metrics { padding: 2px 10px 6px; }
+.fm-row { display: flex; justify-content: space-between; font-size: .75em; line-height: 1.8; }
+.fm-key { color: var(--text-3); }
+.fm-val { font-weight: 600; color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; }
+.fm-val.green { color: var(--green); }
+
+.detail-btn {
+    margin: 0 10px 10px; padding: 5px; border: 1.5px solid var(--border);
+    border-radius: 6px; background: white; font-size: .78em; font-weight: 500;
+    cursor: pointer; transition: all .2s; color: var(--text-2);
+}
+.detail-btn:hover { border-color: var(--blue); color: var(--blue); }
+
+/* ===== Stream Final Result ===== */
+.stream-final { flex-shrink: 0; }
+.final-title {
+    display: flex; align-items: center; gap: 8px; font-size: .9em; font-weight: 600;
+    color: var(--green); margin-bottom: 10px;
+}
+
+/* ===== Detail Modal ===== */
+.modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.5);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000; padding: 24px;
+}
+.modal-container {
+    background: var(--surface); border-radius: var(--radius);
+    width: 100%; max-width: 960px; height: 90vh;
+    display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.3);
+    overflow: hidden;
+}
+.modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.modal-title { font-size: 1em; font-weight: 700; }
+.modal-close {
+    width: 32px; height: 32px; border: none; background: var(--bg);
+    border-radius: 8px; cursor: pointer; font-size: 1em; color: var(--text-2);
+    display: flex; align-items: center; justify-content: center; transition: all .2s;
+}
+.modal-close:hover { background: var(--border); color: var(--text); }
+.modal-body {
+    flex: 1; display: flex; flex-direction: column; padding: 16px 24px;
+    gap: 12px; overflow: hidden; min-height: 0;
+}
+
+/* 查看结果按钮 */
+.view-result-btn {
+    margin-top: 12px; padding: 9px 20px; border: 1.5px solid var(--green);
+    border-radius: 8px; background: white; color: var(--green); font-size: .88em;
+    font-weight: 600; cursor: pointer; transition: all .2s;
+}
+.view-result-btn:hover { background: var(--green); color: white; }
+
+/* 结果 JSON */
+.result-json {
+    background: #0f172a; color: #7dd3fc; font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: .85em; line-height: 1.8; padding: 20px; border-radius: 10px;
+    margin: 0; white-space: pre; overflow-x: auto;
+}
