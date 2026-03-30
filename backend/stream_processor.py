@@ -7,7 +7,7 @@ import uuid
 
 from image_processor import analyze_image
 
-# { session_id: { config, status, start_time, frames, queue, thread } }
+# { session_id: { config, status, start_time, frames, queue, thread, latest_frame, frame_lock } }
 sessions = {}
 
 
@@ -19,13 +19,43 @@ def _make_thumbnail(frame, width=200):
     return base64.b64encode(buf).decode('utf-8')
 
 
+def _video_read_loop(session_id):
+    """持续读取视频帧，更新 latest_frame，供预览流和分析使用"""
+    session = sessions[session_id]
+    config = session['config']
+    cap = cv2.VideoCapture(config['source'])
+
+    if not cap.isOpened():
+        session['cap_opened'] = False
+        return
+
+    session['cap_opened'] = True
+    while session['status'] == 'running':
+        ret, frame = cap.read()
+        if not ret:
+            # 本地视频读到末尾，循环播放
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            continue
+        with session['frame_lock']:
+            session['latest_frame'] = frame
+        time.sleep(0.033)  # ~30fps
+
+    cap.release()
+
+
 def _capture_loop(session_id):
+    """按设定间隔抓取当前帧进行色差分析"""
     session = sessions[session_id]
     config = session['config']
     q = session['queue']
 
-    cap = cv2.VideoCapture(config['source'])
-    if not cap.isOpened():
+    # 等待视频读取线程打开视频源（最多5秒）
+    for _ in range(50):
+        if session['cap_opened'] is not None:
+            break
+        time.sleep(0.1)
+
+    if not session.get('cap_opened'):
         q.put({'type': 'error', 'message': '无法打开视频源，请检查路径或 RTSP 地址'})
         session['status'] = 'error'
         return
@@ -34,23 +64,13 @@ def _capture_loop(session_id):
     frame_index = 0
     interval = config['interval']
 
-    # 获取视频帧率，用于按时间跳帧
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25
-    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-
     while session['status'] == 'running':
-        # 计算当前应该抓取的视频时间位置（秒）
-        target_video_time = frame_index * interval
-        target_frame_pos = int(target_video_time * fps)
+        with session['frame_lock']:
+            frame = session.get('latest_frame')
 
-        # 如果视频有限长，循环处理
-        if total_frames > 0:
-            target_frame_pos = target_frame_pos % int(total_frames)
-
-        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame_pos)
-        ret, frame = cap.read()
-        if not ret:
-            break
+        if frame is None:
+            time.sleep(0.1)
+            continue
 
         capture_time = round(time.time() - session['start_time'], 1)
         thumbnail = _make_thumbnail(frame)
@@ -89,10 +109,7 @@ def _capture_loop(session_id):
             'result': result
         }
 
-        # 内存中保存完整分析数据（含步骤图）
         session['frames'].append({**frame_data, 'analysis': analysis})
-
-        # SSE 只推轻量数据（不含步骤图）
         q.put({'type': 'frame', 'data': frame_data})
 
         frame_index += 1
@@ -102,13 +119,11 @@ def _capture_loop(session_id):
             q.put({'type': 'completed', 'data': frame_data})
             break
 
-        # 等到下一个抓拍时间点
         next_capture_wall_time = session['start_time'] + frame_index * interval
         sleep_secs = next_capture_wall_time - time.time()
         if sleep_secs > 0:
             time.sleep(sleep_secs)
 
-    cap.release()
     if session['status'] == 'running':
         session['status'] = 'stopped'
         q.put({'type': 'stopped'})
@@ -122,11 +137,17 @@ def start_session(config):
         'start_time': None,
         'frames': [],
         'queue': queue.Queue(),
-        'thread': None
+        'latest_frame': None,
+        'frame_lock': threading.Lock(),
+        'thread': None,
+        'cap_opened': None  # None=未知, True=成功, False=失败
     }
-    t = threading.Thread(target=_capture_loop, args=(session_id,), daemon=True)
-    sessions[session_id]['thread'] = t
-    t.start()
+
+    t_read = threading.Thread(target=_video_read_loop, args=(session_id,), daemon=True)
+    t_analyze = threading.Thread(target=_capture_loop, args=(session_id,), daemon=True)
+    sessions[session_id]['thread'] = t_analyze
+    t_read.start()
+    t_analyze.start()
     return session_id
 
 
@@ -142,3 +163,21 @@ def get_frame_detail(session_id, frame_index):
     if 0 <= frame_index < len(frames):
         return frames[frame_index]
     return None
+
+
+def generate_preview_stream(session_id):
+    """生成 MJPEG 流供前端实时预览"""
+    if session_id not in sessions:
+        return
+
+    session = sessions[session_id]
+
+    while session['status'] in ('running', 'completed'):
+        with session['frame_lock']:
+            frame = session.get('latest_frame')
+        if frame is not None:
+            ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if ok:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + buf.tobytes() + b'\r\n')
+        time.sleep(0.05)  # ~20fps

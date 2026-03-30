@@ -80,6 +80,20 @@ function initStreamUI() {
     document.getElementById('s-view-result-btn-inline').style.display = 'none';
     document.getElementById('s-start-btn').style.display = 'none';
     document.getElementById('s-stop-btn').style.display = 'flex';
+
+    const canvas = document.getElementById('s-preview-canvas');
+    canvas.style.display = 'none';
+    let img = document.getElementById('s-preview-img');
+    if (!img) {
+        img = document.createElement('img');
+        img.id = 's-preview-img';
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.objectFit = 'contain';
+        document.getElementById('s-preview').appendChild(img);
+    }
+    img.src = `${STREAM_API}/video/${currentSessionId}`;
+    img.style.display = 'block';
 }
 
 // ===== SSE 连接 =====
@@ -128,15 +142,7 @@ function onFrame(data) {
 }
 
 function updatePreview(thumbnail) {
-    const canvas = document.getElementById('s-preview-canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-    img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-    };
-    img.src = 'data:image/jpeg;base64,' + thumbnail;
+    // 实时视频流已通过 img 标签显示，不再需要 canvas 更新
 }
 
 function onFrameError(event) {

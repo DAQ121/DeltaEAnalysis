@@ -2,7 +2,7 @@ import json
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 from image_processor import analyze_image
-from stream_processor import start_session, stop_session, get_frame_detail, sessions
+from stream_processor import start_session, stop_session, get_frame_detail, generate_preview_stream, sessions
 
 app = Flask(__name__)
 CORS(app)
@@ -78,6 +78,14 @@ def stream_frame_detail(session_id, frame_index):
     if frame is None:
         return jsonify({'error': 'Frame not found'}), 404
     return jsonify({'success': True, 'analysis': frame['analysis']})
+
+
+@app.route('/api/stream/video/<session_id>')
+def stream_video(session_id):
+    if session_id not in sessions:
+        return jsonify({'error': 'Session not found'}), 404
+    return Response(generate_preview_stream(session_id),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 if __name__ == '__main__':
