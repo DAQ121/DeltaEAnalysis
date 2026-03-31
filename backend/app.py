@@ -1,7 +1,7 @@
 import json
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
-from image_processor import analyze_image
+from image_processor import analyze_image, ImageProcessingError
 from stream_processor import start_session, stop_session, get_frame_detail, generate_preview_stream, sessions
 
 app = Flask(__name__)
@@ -19,8 +19,10 @@ def analyze():
         result = analyze_image(image_data, threshold, grid_size)
         return jsonify(result)
 
-    except Exception as e:
+    except ImageProcessingError as e:
         return jsonify({"success": False, "error": str(e)}), 400
+    except Exception:
+        return jsonify({"success": False, "error": "服务器内部错误，请稍后重试"}), 500
 
 
 @app.route('/api/stream/start', methods=['POST'])
@@ -89,4 +91,4 @@ def stream_video(session_id):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5002, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=5002, threaded=True, use_reloader=False)

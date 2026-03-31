@@ -1,5 +1,35 @@
 const API_URL = 'http://localhost:5002/api/analyze';
 
+/* ===== Toast 通知 ===== */
+const TOAST_ICONS = {
+    error:   '<svg viewBox="0 0 20 20" fill="currentColor"><circle cx="10" cy="10" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="6" x2="10" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14" r="1" /></svg>',
+    warning: '<svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2 L19 17 H1 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><line x1="10" y1="8" x2="10" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="14.5" r="1"/></svg>',
+    success: '<svg viewBox="0 0 20 20" fill="currentColor"><circle cx="10" cy="10" r="9" fill="none" stroke="currentColor" stroke-width="1.5"/><polyline points="6,10 9,13 14,7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
+function showToast(message, type = 'error', duration = 4000) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML =
+        `<span class="toast-icon">${TOAST_ICONS[type] || TOAST_ICONS.error}</span>` +
+        `<span class="toast-body">${message}</span>` +
+        `<button class="toast-close">&times;</button>` +
+        `<span class="toast-progress" style="animation-duration:${duration}ms"></span>`;
+    toast.querySelector('.toast-close').onclick = () => dismissToast(toast);
+    container.appendChild(toast);
+    // 最多保留 5 条
+    while (container.children.length > 5) container.removeChild(container.firstChild);
+    const timer = setTimeout(() => dismissToast(toast), duration);
+    toast._timer = timer;
+}
+function dismissToast(toast) {
+    if (toast._dismissed) return;
+    toast._dismissed = true;
+    clearTimeout(toast._timer);
+    toast.classList.add('toast-exit');
+    toast.addEventListener('animationend', () => toast.remove());
+}
+
 let uploadedImage = null;
 let analysisResult = null;
 let activeStep = 0;
@@ -71,6 +101,13 @@ function handleImageUpload(file) {
     reader.readAsDataURL(file);
 }
 
+function setGlobalStatus(state, text) {
+    const dot = document.getElementById('global-status-dot');
+    const label = document.getElementById('global-status-text');
+    if (dot) { dot.className = 'status-indicator ' + state; }
+    if (label) { label.textContent = text; }
+}
+
 async function startAnalysis() {
     if (!uploadedImage) return;
 
@@ -82,6 +119,7 @@ async function startAnalysis() {
     document.getElementById('visualization').style.display = 'none';
     document.getElementById('result-section').style.display = 'none';
     document.getElementById('empty-state').style.display = 'none';
+    setGlobalStatus('running', '分析中');
 
     try {
         const response = await fetch(API_URL, {
@@ -94,13 +132,16 @@ async function startAnalysis() {
         if (result.success) {
             analysisResult = result;
             displayResults(result);
+            setGlobalStatus('done', '分析完成');
         } else {
-            alert('分析失败: ' + result.error);
+            showToast('分析失败: ' + result.error, 'error');
             document.getElementById('empty-state').style.display = 'flex';
+            setGlobalStatus('stopped', '出错');
         }
     } catch (error) {
-        alert('请求失败: ' + error.message);
+        showToast('请求失败: ' + error.message, 'error');
         document.getElementById('empty-state').style.display = 'flex';
+        setGlobalStatus('stopped', 'ERROR');
     } finally {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('analyze-btn').disabled = false;
@@ -116,16 +157,14 @@ function displayResults(result) {
 }
 
 function displayResultCards(r) {
-    const fmtLab = (arr) => `
-        <div class="lab-row"><span class="lab-ch">L：</span><span class="lab-num">${arr[0]}</span></div>
-        <div class="lab-row"><span class="lab-ch">a：</span><span class="lab-num">${arr[1]}</span></div>
-        <div class="lab-row"><span class="lab-ch">b：</span><span class="lab-num">${arr[2]}</span></div>`;
-    document.getElementById('left-lab-value').innerHTML = fmtLab(r.left_lab);
-    document.getElementById('right-lab-value').innerHTML = fmtLab(r.right_lab);
+    const fmtLab = (arr) =>
+        `L ${arr[0]}  a ${arr[1]}  b ${arr[2]}`;
+    document.getElementById('left-lab-value').textContent = fmtLab(r.left_lab);
+    document.getElementById('right-lab-value').textContent = fmtLab(r.right_lab);
     document.getElementById('delta-e-value').textContent = r.overall_delta_e.toFixed(2);
     document.getElementById('ratio-value').textContent = (r.color_change_ratio * 100).toFixed(1) + '%';
     document.getElementById('ratio-label').textContent =
-        `${r.changed_cells} / ${r.total_cells} 格超过阈值 ${r.threshold_used}`;
+        `${r.changed_cells} / ${r.total_cells}  THR ${r.threshold_used}`;
 }
 
 function buildStepper(steps) {

@@ -116,7 +116,7 @@ def _capture_loop(session_id):
 
         if is_changed:
             session['status'] = 'completed'
-            q.put({'type': 'completed', 'data': frame_data})
+            q.put({'type': 'completed', 'data': {'result': result}})
             break
 
         next_capture_wall_time = session['start_time'] + frame_index * interval

@@ -22,3 +22,7 @@ Thumbs.db
 static/uploads/*
 !static/uploads/.gitkeep
 *.log
+
+# Media / binary
+mediamtx/
+*.mp4

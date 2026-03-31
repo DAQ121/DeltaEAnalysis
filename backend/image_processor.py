@@ -6,11 +6,19 @@ from io import BytesIO
 from PIL import Image
 
 
+class ImageProcessingError(ValueError):
+    """用户可见的图像处理错误"""
+    pass
+
+
 def decode_image(base64_string):
     """解码base64图片"""
-    img_data = base64.b64decode(base64_string.split(',')[1] if ',' in base64_string else base64_string)
-    img = Image.open(BytesIO(img_data))
-    return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    try:
+        img_data = base64.b64decode(base64_string.split(',')[1] if ',' in base64_string else base64_string)
+        img = Image.open(BytesIO(img_data))
+        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    except Exception:
+        raise ImageProcessingError("图片解码失败，请确认上传的是有效的图片文件")
 
 
 def encode_image(img):
@@ -31,7 +39,7 @@ def extract_roi(image):
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     if not contours:
-        raise ValueError("未检测到试纸区域")
+        raise ImageProcessingError("未检测到试纸区域，请确认图片中包含试纸")
 
     largest_contour = max(contours, key=cv2.contourArea)
 
@@ -47,11 +55,17 @@ def extract_roi(image):
     if width < height:
         width, height = height, width
 
+    if width < 2 or height < 2:
+        raise ImageProcessingError("检测到的试纸区域过小，请确认图片中包含完整的试纸")
+
     src_pts = box.astype("float32")
     dst_pts = np.array([[0, height-1], [0, 0], [width-1, 0], [width-1, height-1]], dtype="float32")
-    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-    roi = cv2.warpPerspective(image, M, (width, height))
-    roi_mask = cv2.warpPerspective(mask, M, (width, height))
+    try:
+        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+        roi = cv2.warpPerspective(image, M, (width, height))
+        roi_mask = cv2.warpPerspective(mask, M, (width, height))
+    except cv2.error:
+        raise ImageProcessingError("试纸区域校正失败，轮廓形状异常，请调整拍摄角度后重试")
 
     roi[roi_mask == 0] = [255, 255, 255]
 
@@ -70,13 +84,21 @@ def extract_roi(image):
 def find_hole_and_crop(roi_image, roi_mask):
     """
     步骤2: 找到黑洞位置，裁掉黑洞及其左侧所有区域，保留黑洞右侧部分。
-    黑洞定义：试纸内部的暗色区域（灰度值 < 50）。
+    黑洞定义：试纸内部的暗色区域，阈值根据 ROI 亮度自适应计算。
     """
     h, w = roi_image.shape[:2]
     gray = cv2.cvtColor(roi_image, cv2.COLOR_BGR2GRAY)
 
+    # 自适应阈值：取 ROI 掩码内灰度中位数的 40%，下限 15 上限 50
+    valid_gray = gray[roi_mask > 0]
+    if len(valid_gray) > 0:
+        median_val = float(np.median(valid_gray))
+        hole_thresh = int(np.clip(median_val * 0.4, 15, 50))
+    else:
+        hole_thresh = 50
+
     # 在试纸掩码内找暗区域
-    _, hole_mask = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY_INV)
+    _, hole_mask = cv2.threshold(gray, hole_thresh, 255, cv2.THRESH_BINARY_INV)
     hole_mask = cv2.bitwise_and(hole_mask, roi_mask)
 
     # 形态学去噪，保留较大的黑洞
@@ -89,19 +111,31 @@ def find_hole_and_crop(roi_image, roi_mask):
     largest_hole = None
     if contours:
         largest_hole = max(contours, key=cv2.contourArea)
-        x, y, wh, hh = cv2.boundingRect(largest_hole)
-        # 膨胀：右边界额外加半个孔宽作为 padding，确保黑圈完全裁掉
-        padding = wh // 4
-        hole_right_x = min(x + wh + padding, w)
+        hole_area = cv2.contourArea(largest_hole)
+        roi_area = h * w
+        # 黑洞面积不应超过 ROI 的 20%，否则说明图片太暗导致误检
+        if hole_area > roi_area * 0.2:
+            largest_hole = None
+        else:
+            x, y, wh, hh = cv2.boundingRect(largest_hole)
+            # 膨胀：右边界额外加半个孔宽作为 padding，确保黑圈完全裁掉
+            padding = wh // 4
+            hole_right_x = min(x + wh + padding, w)
 
     # 可视化
     vis_img = roi_image.copy()
     if hole_right_x is not None:
         cv2.line(vis_img, (hole_right_x, 0), (hole_right_x, h), (0, 0, 255), 2)
         cv2.drawContours(vis_img, [largest_hole], -1, (0, 255, 255), 2)
-        # 裁剪：保留膨胀后右边界以右
-        cropped = roi_image[:, hole_right_x:]
-        cropped_mask = roi_mask[:, hole_right_x:]
+        # 裁剪：保留膨胀后右边界以右，确保剩余宽度 > 0
+        remaining_width = w - hole_right_x
+        if remaining_width < 2:
+            cropped = roi_image.copy()
+            cropped_mask = roi_mask.copy()
+            hole_right_x = None
+        else:
+            cropped = roi_image[:, hole_right_x:].copy()
+            cropped_mask = roi_mask[:, hole_right_x:].copy()
     else:
         cropped = roi_image.copy()
         cropped_mask = roi_mask.copy()
@@ -119,6 +153,8 @@ def split_left_right(cropped_image, cropped_mask):
     步骤3: 从中间将裁剪后的图像分为左右两部分。
     """
     h, w = cropped_image.shape[:2]
+    if w < 4 or h < 2:
+        raise ImageProcessingError("裁剪后的试纸区域过小，无法进行左右分割分析")
     mid = w // 2
 
     left_img = cropped_image[:, :mid]
@@ -158,6 +194,9 @@ def divide_into_grid(roi_image, grid_size):
 
     grid_h = h // cell_size
     grid_w = w // cell_size
+
+    if grid_h < 1 or grid_w < 1:
+        raise ImageProcessingError("图像太小，无法划分有效的分析网格，请尝试减小网格数")
 
     grid_overlay = roi_image.copy()
     for i in range(1, grid_h):
@@ -242,99 +281,104 @@ def detect_color_change(roi_image, delta_e_matrix, threshold, grid_data, mid_x=0
 
 def analyze_image(image_data, threshold=10, grid_size=10):
     """主分析函数"""
-    image = decode_image(image_data)
+    try:
+        image = decode_image(image_data)
 
-    # 步骤1: ROI 提取
-    roi_data = extract_roi(image)
+        # 步骤1: ROI 提取
+        roi_data = extract_roi(image)
 
-    # 步骤2: 找黑洞，裁掉黑洞以上部分
-    crop_data = find_hole_and_crop(roi_data["roi_image"], roi_data["roi_mask"])
+        # 步骤2: 找黑洞，裁掉黑洞以上部分
+        crop_data = find_hole_and_crop(roi_data["roi_image"], roi_data["roi_mask"])
 
-    # 步骤3: 左右分割
-    split_data = split_left_right(crop_data["cropped_image"], crop_data["cropped_mask"])
+        # 步骤3: 左右分割
+        split_data = split_left_right(crop_data["cropped_image"], crop_data["cropped_mask"])
 
-    # 计算左右平均 LAB
-    left_lab = compute_mean_lab(split_data["left_img"], split_data["left_mask"])
-    right_lab = compute_mean_lab(split_data["right_img"], split_data["right_mask"])
+        # 计算左右平均 LAB
+        left_lab = compute_mean_lab(split_data["left_img"], split_data["left_mask"])
+        right_lab = compute_mean_lab(split_data["right_img"], split_data["right_mask"])
 
-    # 步骤4: 直接用右侧均值 LAB vs 左侧均值 LAB 算整体 ΔE
-    overall_delta_e = float(np.sqrt(np.sum((right_lab - left_lab) ** 2)))
+        # 步骤4: 直接用右侧均值 LAB vs 左侧均值 LAB 算整体 ΔE
+        overall_delta_e = float(np.sqrt(np.sum((right_lab - left_lab) ** 2)))
 
-    # 步骤5: 对完整裁剪图划网格，右侧网格算 ΔE，分母为全部网格数
-    full_grid_data = divide_into_grid(crop_data["cropped_image"], grid_size)
-    mid_x = split_data["mid_x"]
-    delta_e_data = calculate_delta_e_grid(
-        crop_data["cropped_image"], crop_data["cropped_mask"], left_lab, full_grid_data
-    )
-    change_data = detect_color_change(
-        crop_data["cropped_image"], delta_e_data["delta_e_matrix"],
-        threshold, full_grid_data, mid_x
-    )
+        # 步骤5: 对完整裁剪图划网格，右侧网格算 ΔE，分母为全部网格数
+        full_grid_data = divide_into_grid(crop_data["cropped_image"], grid_size)
+        mid_x = split_data["mid_x"]
+        delta_e_data = calculate_delta_e_grid(
+            crop_data["cropped_image"], crop_data["cropped_mask"], left_lab, full_grid_data
+        )
+        change_data = detect_color_change(
+            crop_data["cropped_image"], delta_e_data["delta_e_matrix"],
+            threshold, full_grid_data, mid_x
+        )
 
-    total_cells = full_grid_data["grid_size"][0] * full_grid_data["grid_size"][1]
-    changed_ratio = change_data["changed_cells"] / max(total_cells, 1)
+        total_cells = full_grid_data["grid_size"][0] * full_grid_data["grid_size"][1]
+        changed_ratio = change_data["changed_cells"] / max(total_cells, 1)
 
-    return {
-        "success": True,
-        "steps": {
-            "step1_roi_extraction": {
-                "title": "ROI 提取",
-                "description": "检测试纸轮廓，旋转矩形校正角度，提取试纸区域",
-                "images": {
-                    "binary": encode_image(roi_data["binary"]),
-                    "contours": encode_image(roi_data["contour_img"]),
-                    "roi": encode_image(roi_data["roi_image"])
+        return {
+            "success": True,
+            "steps": {
+                "step1_roi_extraction": {
+                    "title": "ROI 提取",
+                    "description": "检测试纸轮廓，旋转矩形校正角度，提取试纸区域",
+                    "images": {
+                        "binary": encode_image(roi_data["binary"]),
+                        "contours": encode_image(roi_data["contour_img"]),
+                        "roi": encode_image(roi_data["roi_image"])
+                    },
+                    "data": {"roi_size": [roi_data["roi_coords"][2], roi_data["roi_coords"][3]]}
                 },
-                "data": {"roi_size": [roi_data["roi_coords"][2], roi_data["roi_coords"][3]]}
-            },
-            "step2_crop": {
-                "title": "黑洞定位与裁剪",
-                "description": "找到试纸上的黑洞，裁掉黑洞及其左侧区域，保留右侧有效检测区域",
-                "images": {
-                    "hole_detection": encode_image(crop_data["vis_img"]),
-                    "cropped": encode_image(crop_data["cropped_image"])
+                "step2_crop": {
+                    "title": "黑洞定位与裁剪",
+                    "description": "找到试纸上的黑洞，裁掉黑洞及其左侧区域，保留右侧有效检测区域",
+                    "images": {
+                        "hole_detection": encode_image(crop_data["vis_img"]),
+                        "cropped": encode_image(crop_data["cropped_image"])
+                    },
+                    "data": {
+                        "hole_right_x": crop_data["hole_right_x"],
+                        "cropped_size": [crop_data["cropped_image"].shape[1], crop_data["cropped_image"].shape[0]]
+                    }
                 },
-                "data": {
-                    "hole_right_x": crop_data["hole_right_x"],
-                    "cropped_size": [crop_data["cropped_image"].shape[1], crop_data["cropped_image"].shape[0]]
+                "step3_split": {
+                    "title": "左右分割与色差计算",
+                    "description": "从中间分为左右两部分，分别计算平均 LAB，以左侧为基准计算整体 ΔE（CIE76）",
+                    "images": {
+                        "split_view": encode_image(split_data["split_vis"])
+                    },
+                    "data": {
+                        "formula": "ΔE = √((L₂-L₁)² + (a₂-a₁)² + (b₂-b₁)²)",
+                        "left_lab": [round(v, 2) for v in left_lab.tolist()],
+                        "right_lab": [round(v, 2) for v in right_lab.tolist()],
+                        "delta_e": round(overall_delta_e, 2)
+                    }
+                },
+                "step5_color_change": {
+                    "title": "网格色差与变色统计",
+                    "description": f"划分网格，计算每格 ΔE，统计超过阈值 {threshold} 的网格比例",
+                    "images": {
+                        "grid_overlay": encode_image(full_grid_data["grid_overlay"]),
+                        "heatmap": encode_image(delta_e_data["heatmap"]),
+                        "highlighted_area": encode_image(change_data["highlighted_area"])
+                    },
+                    "data": {
+                        "threshold": threshold,
+                        "total_cells": total_cells,
+                        "changed_cells": change_data["changed_cells"],
+                        "ratio": round(changed_ratio * 100, 2)
+                    }
                 }
             },
-            "step3_split": {
-                "title": "左右分割与色差计算",
-                "description": "从中间分为左右两部分，分别计算平均 LAB，以左侧为基准计算整体 ΔE（CIE76）",
-                "images": {
-                    "split_view": encode_image(split_data["split_vis"])
-                },
-                "data": {
-                    "formula": "ΔE = √((L₂-L₁)² + (a₂-a₁)² + (b₂-b₁)²)",
-                    "left_lab": [round(v, 2) for v in left_lab.tolist()],
-                    "right_lab": [round(v, 2) for v in right_lab.tolist()],
-                    "delta_e": round(overall_delta_e, 2)
-                }
-            },
-            "step5_color_change": {
-                "title": "网格色差与变色统计",
-                "description": f"划分网格，计算每格 ΔE，统计超过阈值 {threshold} 的网格比例",
-                "images": {
-                    "grid_overlay": encode_image(full_grid_data["grid_overlay"]),
-                    "heatmap": encode_image(delta_e_data["heatmap"]),
-                    "highlighted_area": encode_image(change_data["highlighted_area"])
-                },
-                "data": {
-                    "threshold": threshold,
-                    "total_cells": total_cells,
-                    "changed_cells": change_data["changed_cells"],
-                    "ratio": round(changed_ratio * 100, 2)
-                }
+            "final_results": {
+                "left_lab": [round(v, 2) for v in left_lab.tolist()],
+                "right_lab": [round(v, 2) for v in right_lab.tolist()],
+                "overall_delta_e": round(overall_delta_e, 2),
+                "changed_cells": change_data["changed_cells"],
+                "total_cells": total_cells,
+                "color_change_ratio": round(float(changed_ratio), 4),
+                "threshold_used": threshold
             }
-        },
-        "final_results": {
-            "left_lab": [round(v, 2) for v in left_lab.tolist()],
-            "right_lab": [round(v, 2) for v in right_lab.tolist()],
-            "overall_delta_e": round(overall_delta_e, 2),
-            "changed_cells": change_data["changed_cells"],
-            "total_cells": total_cells,
-            "color_change_ratio": round(float(changed_ratio), 4),
-            "threshold_used": threshold
         }
-    }
+    except ImageProcessingError:
+        raise
+    except Exception:
+        raise ImageProcessingError("图像分析过程中发生未知错误，请检查图片质量后重试")

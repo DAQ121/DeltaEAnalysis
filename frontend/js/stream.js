@@ -11,6 +11,13 @@ const STREAM_IMG_LABELS = {
     grid_overlay: '网格划分', heatmap: '色差热力图', highlighted_area: '变色标注'
 };
 
+function setGlobalStatus(state, text) {
+    const dot = document.getElementById('global-status-dot');
+    const label = document.getElementById('global-status-text');
+    if (dot) dot.className = 'status-indicator ' + state;
+    if (label) label.textContent = text;
+}
+
 // ===== Tab 切换 =====
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -41,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ===== 启动检测 =====
 async function startStream() {
     const source = document.getElementById('s-source').value.trim();
-    if (!source) { alert('请填写视频源路径或 RTSP 地址'); return; }
+    if (!source) { showToast('请填写视频源路径或 RTSP 地址', 'warning'); return; }
 
     const config = {
         source,
@@ -57,13 +64,13 @@ async function startStream() {
             body: JSON.stringify(config)
         });
         const data = await res.json();
-        if (!data.success) { alert('启动失败: ' + data.error); return; }
+        if (!data.success) { showToast('启动失败: ' + data.error, 'error'); return; }
 
         currentSessionId = data.session_id;
         initStreamUI();
         connectSSE(currentSessionId);
     } catch (e) {
-        alert('请求失败: ' + e.message);
+        showToast('请求失败: ' + e.message, 'error');
     }
 }
 
@@ -72,14 +79,15 @@ function initStreamUI() {
     document.getElementById('s-final').style.display = 'none';
     document.getElementById('s-timeline').innerHTML = '';
     document.getElementById('s-preview').style.display = 'flex';
-    document.getElementById('s-timeline-wrap').style.display = 'block';
+    document.getElementById('s-timeline-wrap').style.display = 'flex';
     document.getElementById('s-status').style.display = 'flex';
-    document.getElementById('s-status-dot').className = 'status-dot running';
-    document.getElementById('s-status-text').textContent = '检测中...';
+    document.getElementById('s-status-dot').className = 'status-indicator running';
+    document.getElementById('s-status-text').textContent = '检测中';
     document.getElementById('s-frame-count').textContent = '已抓 0 帧';
     document.getElementById('s-view-result-btn-inline').style.display = 'none';
     document.getElementById('s-start-btn').style.display = 'none';
     document.getElementById('s-stop-btn').style.display = 'flex';
+    setGlobalStatus('running', '流检测中');
 
     const canvas = document.getElementById('s-preview-canvas');
     canvas.style.display = 'none';
@@ -105,7 +113,7 @@ function connectSSE(sessionId) {
         const event = JSON.parse(e.data);
         if (event.type === 'frame') onFrame(event.data);
         else if (event.type === 'frame_error') onFrameError(event);
-        else if (event.type === 'completed') { onFrame(event.data); onCompleted(event.data); }
+        else if (event.type === 'completed') { onCompleted(event.data); }
         else if (event.type === 'stopped') onStopped();
         else if (event.type === 'error') onError(event.message);
     };
@@ -125,10 +133,11 @@ async function stopStream() {
 }
 
 function setStatusStopped() {
-    document.getElementById('s-status-dot').className = 'status-dot stopped';
+    document.getElementById('s-status-dot').className = 'status-indicator stopped';
     document.getElementById('s-status-text').textContent = '已停止';
     document.getElementById('s-start-btn').style.display = 'flex';
     document.getElementById('s-stop-btn').style.display = 'none';
+    setGlobalStatus('idle', '待机');
 }
 
 // ===== 事件处理 =====
@@ -151,10 +160,11 @@ function onFrameError(event) {
 
 function onCompleted(data) {
     if (currentEventSource) currentEventSource.close();
-    document.getElementById('s-status-dot').className = 'status-dot completed';
-    document.getElementById('s-status-text').textContent = '检测完成 — 发现变色';
+    document.getElementById('s-status-dot').className = 'status-indicator done';
+    document.getElementById('s-status-text').textContent = '已发现变色';
     document.getElementById('s-start-btn').style.display = 'flex';
     document.getElementById('s-stop-btn').style.display = 'none';
+    setGlobalStatus('done', '检测完成');
     showFinalResult(data.result);
 }
 
@@ -163,10 +173,11 @@ function onStopped() {
 }
 
 function onError(msg) {
-    document.getElementById('s-status-dot').className = 'status-dot stopped';
+    document.getElementById('s-status-dot').className = 'status-indicator stopped';
     document.getElementById('s-status-text').textContent = '错误: ' + msg;
     document.getElementById('s-start-btn').style.display = 'flex';
     document.getElementById('s-stop-btn').style.display = 'none';
+    setGlobalStatus('stopped', '出错');
 }
 
 // ===== 渲染帧卡片 =====
@@ -215,18 +226,18 @@ function showFinalResult(r) {
         change_ratio: r.change_ratio
     };
     const cards = [
-        { icon: 'ΔE', cls: 'rc-orange', label: '色度差', value: r.deltaE.toFixed(2) },
-        { icon: '%', cls: 'rc-blue', label: 'ΔE 占阈值比', value: (r.deltaE_ratio * 100).toFixed(1) + '%' },
-        { icon: '格', cls: 'rc-purple', label: '变色网格占比', value: (r.change_ratio * 100).toFixed(1) + '%' },
-        { icon: 'T', cls: 'rc-red', label: '变色时长', value: r.change_time + 's' }
+        { ch: 'ΔE', cls: 'rc-ch-de', label: '色度差', value: r.deltaE.toFixed(2) },
+        { ch: '%',  cls: 'rc-ch-pct', label: 'ΔE 占阈值比', value: (r.deltaE_ratio * 100).toFixed(1) + '%' },
+        { ch: '格', cls: 'rc-ch-r',  label: '变色网格占比', value: (r.change_ratio * 100).toFixed(1) + '%' },
+        { ch: 'T',  cls: '',          label: '变色时长', value: r.change_time + 's' }
     ];
     document.getElementById('s-final-cards').innerHTML = cards.map(c => `
-        <div class="result-card">
-            <div class="rc-icon ${c.cls}">${c.icon}</div>
-            <div class="rc-body">
-                <div class="rc-label">${c.label}</div>
-                <div class="rc-value">${c.value}</div>
+        <div class="result-card${c.cls === 'rc-ch-de' ? ' result-card-accent' : ''}">
+            <div class="rc-header">
+                <span class="rc-ch mono ${c.cls}">${c.ch}</span>
+                <span class="rc-label">${c.label}</span>
             </div>
+            <div class="rc-value rc-value-large mono">${c.value}</div>
         </div>`).join('');
     document.getElementById('s-final').style.display = 'block';
     const inlineBtn = document.getElementById('s-view-result-btn-inline');
@@ -259,7 +270,7 @@ async function openModal(frameIndex) {
         buildModalResultCards(data.analysis.final_results);
         document.getElementById('detail-modal').style.display = 'flex';
     } catch (e) {
-        alert('加载详情失败: ' + e.message);
+        showToast('加载详情失败: ' + e.message, 'error');
     }
 }
 
@@ -330,22 +341,22 @@ function showModalStep(index) {
 }
 
 function buildModalResultCards(r) {
-    const fmtLab = arr => `L ${arr[0]} / a ${arr[1]} / b ${arr[2]}`;
+    const fmtLab = arr => `L ${arr[0]}  a ${arr[1]}  b ${arr[2]}`;
     document.getElementById('modal-result-cards').innerHTML = `
         <div class="result-card">
-            <div class="rc-icon rc-blue">L</div>
-            <div class="rc-body"><div class="rc-label">左侧平均 LAB（基准）</div><div class="rc-value mono">${fmtLab(r.left_lab)}</div></div>
+            <div class="rc-header"><span class="rc-ch mono">L</span><span class="rc-label">左侧基准 LAB</span></div>
+            <div class="rc-value mono">${fmtLab(r.left_lab)}</div>
         </div>
         <div class="result-card">
-            <div class="rc-icon rc-purple">R</div>
-            <div class="rc-body"><div class="rc-label">右侧平均 LAB</div><div class="rc-value mono">${fmtLab(r.right_lab)}</div></div>
+            <div class="rc-header"><span class="rc-ch mono rc-ch-r">R</span><span class="rc-label">右侧平均 LAB</span></div>
+            <div class="rc-value mono">${fmtLab(r.right_lab)}</div>
+        </div>
+        <div class="result-card result-card-accent">
+            <div class="rc-header"><span class="rc-ch mono rc-ch-de">ΔE</span><span class="rc-label">整体色差</span></div>
+            <div class="rc-value rc-value-large mono">${r.overall_delta_e.toFixed(2)}</div>
         </div>
         <div class="result-card">
-            <div class="rc-icon rc-orange">ΔE</div>
-            <div class="rc-body"><div class="rc-label">整体色差</div><div class="rc-value">${r.overall_delta_e.toFixed(2)}</div></div>
-        </div>
-        <div class="result-card">
-            <div class="rc-icon rc-red">%</div>
-            <div class="rc-body"><div class="rc-label">超阈值网格比例</div><div class="rc-value">${(r.color_change_ratio * 100).toFixed(1)}%</div></div>
+            <div class="rc-header"><span class="rc-ch mono rc-ch-pct">%</span><span class="rc-label">超阈值网格</span></div>
+            <div class="rc-value rc-value-large mono">${(r.color_change_ratio * 100).toFixed(1)}%</div>
         </div>`;
 }
