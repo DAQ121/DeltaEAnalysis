@@ -27,6 +27,18 @@ def encode_image(img):
     return base64.b64encode(buffer).decode('utf-8')
 
 
+def order_points(pts):
+    """将4个角点排序为 [左上, 右上, 右下, 左下]，不受 boxPoints 旋转角度影响"""
+    s = pts.sum(axis=1)
+    d = np.diff(pts, axis=1).flatten()
+    ordered = np.zeros((4, 2), dtype="float32")
+    ordered[0] = pts[np.argmin(s)]   # 左上：x+y 最小
+    ordered[1] = pts[np.argmin(d)]   # 右上：y-x 最小
+    ordered[2] = pts[np.argmax(s)]   # 右下：x+y 最大
+    ordered[3] = pts[np.argmax(d)]   # 左下：y-x 最大
+    return ordered
+
+
 def extract_roi(image):
     """步骤1: 提取ROI区域"""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -50,16 +62,26 @@ def extract_roi(image):
     box = cv2.boxPoints(rect)
     box = np.int0(box)
 
-    width = int(rect[1][0])
-    height = int(rect[1][1])
-    if width < height:
-        width, height = height, width
+    # 用坐标和/差法排序角点，确保顺序不受旋转角度影响
+    ordered = order_points(box.astype("float32"))
+
+    # 从实际点距计算宽高，保持正确宽高比
+    width = int(max(np.linalg.norm(ordered[1] - ordered[0]),
+                    np.linalg.norm(ordered[2] - ordered[3])))
+    height = int(max(np.linalg.norm(ordered[3] - ordered[0]),
+                     np.linalg.norm(ordered[2] - ordered[1])))
 
     if width < 2 or height < 2:
         raise ImageProcessingError("检测到的试纸区域过小，请确认图片中包含完整的试纸")
 
-    src_pts = box.astype("float32")
-    dst_pts = np.array([[0, height-1], [0, 0], [width-1, 0], [width-1, height-1]], dtype="float32")
+    # 确保横向输出（width > height）
+    if height > width:
+        # 旋转点映射：[左上,右上,右下,左下] → [左下,左上,右上,右下]
+        ordered = np.array([ordered[3], ordered[0], ordered[1], ordered[2]])
+        width, height = height, width
+
+    src_pts = ordered
+    dst_pts = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
     try:
         M = cv2.getPerspectiveTransform(src_pts, dst_pts)
         roi = cv2.warpPerspective(image, M, (width, height))
@@ -85,6 +107,7 @@ def find_hole_and_crop(roi_image, roi_mask):
     """
     步骤2: 找到黑洞位置，裁掉黑洞及其左侧所有区域，保留黑洞右侧部分。
     黑洞定义：试纸内部的暗色区域，阈值根据 ROI 亮度自适应计算。
+    黑洞可能在试纸的左端或右端；如果在右端，先水平翻转使其位于左端。
     """
     h, w = roi_image.shape[:2]
     gray = cv2.cvtColor(roi_image, cv2.COLOR_BGR2GRAY)
@@ -118,9 +141,37 @@ def find_hole_and_crop(roi_image, roi_mask):
             largest_hole = None
         else:
             x, y, wh, hh = cv2.boundingRect(largest_hole)
-            # 膨胀：右边界额外加半个孔宽作为 padding，确保黑圈完全裁掉
             padding = wh // 4
-            hole_right_x = min(x + wh + padding, w)
+
+            # 判断黑洞在哪端：如果在右半边，翻转图像使其到左端
+            hole_center_x = x + wh // 2
+            if hole_center_x > w // 2:
+                roi_image = cv2.flip(roi_image, 1)
+                roi_mask = cv2.flip(roi_mask, 1)
+                # 在翻转后的图像上重新检测黑洞位置
+                gray = cv2.cvtColor(roi_image, cv2.COLOR_BGR2GRAY)
+                valid_gray = gray[roi_mask > 0]
+                if len(valid_gray) > 0:
+                    median_val = float(np.median(valid_gray))
+                    hole_thresh = int(np.clip(median_val * 0.4, 15, 50))
+                else:
+                    hole_thresh = 50
+                _, hole_mask = cv2.threshold(gray, hole_thresh, 255, cv2.THRESH_BINARY_INV)
+                hole_mask = cv2.bitwise_and(hole_mask, roi_mask)
+                hole_mask = cv2.morphologyEx(hole_mask, cv2.MORPH_OPEN, kernel)
+                contours, _ = cv2.findContours(hole_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    largest_hole = max(contours, key=cv2.contourArea)
+                    if cv2.contourArea(largest_hole) > roi_area * 0.2:
+                        largest_hole = None
+                    else:
+                        x, y, wh, hh = cv2.boundingRect(largest_hole)
+                        padding = wh // 4
+                        hole_right_x = min(x + wh + padding, w)
+                else:
+                    largest_hole = None
+            else:
+                hole_right_x = min(x + wh + padding, w)
 
     # 可视化
     vis_img = roi_image.copy()
