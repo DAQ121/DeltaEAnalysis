@@ -39,26 +39,153 @@ def order_points(pts):
     return ordered
 
 
+def _score_contour(contour, image_area):
+    """
+    对轮廓按"矩形相似度"打分，用于从多个候选中选出最像试纸的矩形轮廓。
+    返回 (score, rect)，score ∈ [0, 1]，越高越像矩形。
+    不合格的轮廓返回 (0, None)。
+    """
+    area = cv2.contourArea(contour)
+
+    # 硬过滤：太小（< 0.5% 图像面积）或太大（> 85%，可能是背景/光照）
+    if area < image_area * 0.005:
+        return 0.0, None
+    if area > image_area * 0.85:
+        return 0.0, None
+
+    rect = cv2.minAreaRect(contour)
+    rect_w, rect_h = rect[1]
+    rect_area = rect_w * rect_h
+    if rect_area < 1:
+        return 0.0, None
+
+    # ① 矩形度：轮廓面积 / 最小外接矩形面积（矩形≈1.0，不规则光斑远小于1）
+    rectangularity = area / rect_area
+
+    # ② 顶点数：多边形近似应为 ~4 个顶点
+    peri = cv2.arcLength(contour, True)
+    approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
+    n_vertices = len(approx)
+    if n_vertices == 4:
+        vertex_score = 1.0
+    elif n_vertices in (3, 5):
+        vertex_score = 0.6
+    elif n_vertices in (6, 7):
+        vertex_score = 0.3
+    else:
+        vertex_score = 0.1
+
+    # ③ 长宽比：试纸通常为长条矩形
+    if min(rect_w, rect_h) < 1:
+        return 0.0, None
+    aspect = max(rect_w, rect_h) / min(rect_w, rect_h)
+    if 1.5 <= aspect <= 10.0:
+        aspect_score = 1.0
+    elif 1.2 <= aspect <= 15.0:
+        aspect_score = 0.5
+    else:
+        aspect_score = 0.15
+
+    # ④ 面积占比：中等大小优先
+    size_ratio = area / image_area
+    if 0.02 <= size_ratio <= 0.60:
+        size_score = 1.0
+    elif 0.01 <= size_ratio <= 0.75:
+        size_score = 0.5
+    else:
+        size_score = 0.2
+
+    # 加权综合评分
+    score = (0.40 * rectangularity +
+             0.30 * vertex_score +
+             0.15 * aspect_score +
+             0.15 * size_score)
+
+    return score, rect
+
+
+def _generate_candidates(gray, blurred):
+    """
+    运行多种二值化策略，收集所有候选轮廓。
+    返回 [(contour, strategy_name, binary_image), ...] 列表。
+    """
+    candidates = []
+
+    # 策略 A：自适应高斯阈值（核心——处理光照不均）
+    adaptive_binary = cv2.adaptiveThreshold(
+        blurred, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        blockSize=51,
+        C=10
+    )
+    adaptive_inv = cv2.bitwise_not(adaptive_binary)
+
+    kernel_close = np.ones((5, 5), np.uint8)
+    for bin_img in [adaptive_binary, adaptive_inv]:
+        closed = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel_close)
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in contours:
+            candidates.append((c, "adaptive", closed))
+
+    # 策略 B：Canny 边缘检测 + 形态学闭合（边缘对渐变光照鲁棒）
+    edges = cv2.Canny(blurred, 30, 100)
+    kernel_canny = np.ones((5, 5), np.uint8)
+    edges_closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel_canny)
+    contours, _ = cv2.findContours(edges_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for c in contours:
+        candidates.append((c, "canny", edges_closed))
+
+    # 策略 C：Otsu（原方法，均匀光照下最优）
+    _, otsu_binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    kernel_otsu = np.ones((3, 3), np.uint8)
+    otsu_closed = cv2.morphologyEx(otsu_binary, cv2.MORPH_CLOSE, kernel_otsu)
+    contours, _ = cv2.findContours(otsu_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for c in contours:
+        candidates.append((c, "otsu", otsu_closed))
+
+    return candidates
+
+
 def extract_roi(image):
-    """步骤1: 提取ROI区域"""
+    """步骤1: 提取ROI区域（多策略二值化 + 矩形度评分）"""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    image_area = gray.shape[0] * gray.shape[1]
 
-    kernel = np.ones((3, 3), np.uint8)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    # Phase 1: 多策略生成候选轮廓
+    candidates = _generate_candidates(gray, blurred)
 
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    if not contours:
+    if not candidates:
         raise ImageProcessingError("未检测到试纸区域，请确认图片中包含试纸")
 
-    largest_contour = max(contours, key=cv2.contourArea)
+    # Phase 2: 对所有候选按矩形度评分，选最优
+    best_score = 0
+    best_contour = None
+    best_rect = None
+    best_binary = None
+
+    for contour, strategy_name, binary_img in candidates:
+        score, rect = _score_contour(contour, image_area)
+        if score > best_score:
+            best_score = score
+            best_contour = contour
+            best_rect = rect
+            best_binary = binary_img
+
+    MIN_SCORE_THRESHOLD = 0.3
+    if best_score < MIN_SCORE_THRESHOLD or best_contour is None:
+        raise ImageProcessingError(
+            "未检测到矩形试纸区域，请确认图片中包含完整的试纸并避免强烈的光照不均"
+        )
+
+    # Phase 3: 透视变换（与原逻辑一致）
+    binary = best_binary
+    rect = best_rect
 
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
-    cv2.drawContours(mask, [largest_contour], -1, 255, -1)
+    cv2.drawContours(mask, [best_contour], -1, 255, -1)
 
-    rect = cv2.minAreaRect(largest_contour)
     box = cv2.boxPoints(rect)
     box = np.int0(box)
 
@@ -84,11 +211,15 @@ def extract_roi(image):
     dst_pts = np.array([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]], dtype="float32")
     try:
         M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        roi = cv2.warpPerspective(image, M, (width, height))
+        # BORDER_REPLICATE：边缘像素复制填充，避免黑色越界
+        roi = cv2.warpPerspective(image, M, (width, height),
+                                  borderMode=cv2.BORDER_REPLICATE)
         roi_mask = cv2.warpPerspective(mask, M, (width, height))
     except cv2.error:
         raise ImageProcessingError("试纸区域校正失败，轮廓形状异常，请调整拍摄角度后重试")
 
+    # 重新二值化 mask，消除插值产生的半透明边缘（0~255 → 纯 0/255）
+    _, roi_mask = cv2.threshold(roi_mask, 127, 255, cv2.THRESH_BINARY)
     roi[roi_mask == 0] = [255, 255, 255]
 
     contour_img = image.copy()

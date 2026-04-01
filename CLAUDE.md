@@ -31,7 +31,7 @@ python3 -m http.server 8080  # 访问 http://localhost:8080
 - `/api/stream/video/<session_id>` — MJPEG 实时预览流
 
 **image_processor.py** — 核心图像处理流水线，5 个步骤：
-1. `extract_roi()` — Otsu 二值化 + 轮廓检测 + 透视变换提取 ROI
+1. `extract_roi()` — 多策略二值化（自适应阈值 / Canny 边缘 / Otsu）+ 矩形度评分选取最佳轮廓 + 透视变换提取 ROI
 2. `find_hole_and_crop()` — 检测暗色黑洞（灰度 < 50），裁掉黑洞及其左侧区域
 3. `split_left_right()` — 从中点将裁剪图分为左右两半
 4. `calculate_delta_e_grid()` — 在 LAB 色彩空间用 CIE76 公式计算每个网格的 ΔE
@@ -44,6 +44,18 @@ python3 -m http.server 8080  # 访问 http://localhost:8080
 - 本地视频文件读到末尾后循环播放；也支持 RTSP 流
 
 ### 核心算法
+
+**ROI 提取**（`extract_roi()` 多策略管线）：
+- `_generate_candidates()` — 三种二值化策略并行生成候选轮廓：
+  - 自适应高斯阈值（`blockSize=51, C=10`，正/反两极性）—— 抗光照不均
+  - Canny 边缘检测（`30, 100`）+ 形态学闭合 —— 对渐变光照鲁棒
+  - Otsu 全局阈值 —— 均匀光照下最优，保证向后兼容
+- `_score_contour()` — 按矩形相似度对候选评分（0~1），加权维度：
+  - 矩形度 40%（轮廓面积 / minAreaRect 面积）
+  - 顶点数 30%（approxPolyDP ≈ 4 为满分）
+  - 长宽比 15%（1.5~10.0 为满分）
+  - 面积占比 15%（0.5%~85% 图像面积为有效范围）
+- 透视变换使用 `BORDER_REPLICATE` 避免黑色边框，mask 经二值化阈值处理消除插值伪影
 
 **色差计算**（CIE76，CIELAB 色彩空间）：
 ```
