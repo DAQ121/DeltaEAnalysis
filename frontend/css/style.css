@@ -26,6 +26,32 @@
     --radius-lg: 10px;
 }
 
+/* ===== Light Theme ===== */
+[data-theme="light"] {
+    --bg:        #f0f2f5;
+    --bg-2:      #e4e7ec;
+    --bg-3:      #ebeef3;
+    --surface:   #ffffff;
+    --surface-2: #f5f6f8;
+    --border:    #d0d5dd;
+    --border-2:  #c0c7d1;
+    --amber:     #d48a0a;
+    --amber-dim: #a06a08;
+    --amber-glow:rgba(212,138,10,0.10);
+    --amber-glow-strong:rgba(212,138,10,0.18);
+    --green:     #16a07a;
+    --green-dim: rgba(22,160,122,0.12);
+    --red:       #dc3545;
+    --red-dim:   rgba(220,53,69,0.10);
+    --blue:      #2b7de9;
+    --blue-dim:  rgba(43,125,233,0.10);
+    --text:      #1a1d23;
+    --text-2:    #5a6171;
+    --text-3:    #8c95a6;
+    --radius:    6px;
+    --radius-lg: 10px;
+}
+
 html, body { height: 100%; overflow: hidden; }
 body {
     font-family: 'DM Sans', -apple-system, sans-serif;
@@ -46,6 +72,7 @@ body {
         rgba(0,0,0,0.03) 4px
     );
 }
+[data-theme="light"] .scanlines { opacity: 0; }
 
 /* ===== App Layout ===== */
 .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -806,5 +833,31 @@ body {
 @keyframes toastProgress {
     from { transform: scaleX(1); }
     to   { transform: scaleX(0); }
+}
+
+/* ===== Light Theme Overrides ===== */
+[data-theme="light"] .analyze-btn { color: #fff; }
+[data-theme="light"] .modal-overlay { background: rgba(0,0,0,0.35); }
+[data-theme="light"] .stream-preview { background: #e8eaed; }
+[data-theme="light"] .frame-thumb-wrap { background: #e8eaed; }
+[data-theme="light"] .frame-changed-badge { color: #fff; }
+[data-theme="light"] .step-img-wrap img { background: var(--bg-2); }
+
+/* Theme Toggle */
+.theme-toggle {
+    width: 32px; height: 32px;
+    border: 1px solid var(--border-2);
+    border-radius: 6px;
+    background: var(--surface);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    color: var(--text-2);
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+.theme-toggle:hover {
+    border-color: var(--amber);
+    color: var(--amber);
+    background: var(--amber-glow);
 }
 

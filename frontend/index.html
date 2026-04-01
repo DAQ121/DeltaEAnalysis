@@ -8,6 +8,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
+    <script>
+        // 主题初始化（放 head 中避免闪烁）
+        (function(){
+            var t = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
 </head>
 <body>
     <div class="scanlines" aria-hidden="true"></div>
@@ -40,6 +47,14 @@
                         <span class="status-indicator idle" id="global-status-dot"></span>
                         <span class="status-label mono" id="global-status-text">待机</span>
                     </div>
+                    <button class="theme-toggle" id="theme-toggle" title="切换主题">
+                        <svg class="theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                        </svg>
+                        <svg class="theme-icon-light" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
+                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                        </svg>
+                    </button>
                     <div class="header-badge mono">v2.1</div>
                 </div>
             </div>
@@ -339,5 +354,30 @@
 
     <script src="js/main.js"></script>
     <script src="js/stream.js"></script>
+    <script>
+        // 主题切换
+        (function(){
+            var btn = document.getElementById('theme-toggle');
+            var iconDark = btn.querySelector('.theme-icon-dark');
+            var iconLight = btn.querySelector('.theme-icon-light');
+            function applyIcons(theme) {
+                if (theme === 'light') {
+                    iconDark.style.display = 'none';
+                    iconLight.style.display = 'block';
+                } else {
+                    iconDark.style.display = 'block';
+                    iconLight.style.display = 'none';
+                }
+            }
+            applyIcons(document.documentElement.getAttribute('data-theme') || 'dark');
+            btn.addEventListener('click', function(){
+                var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+                var next = cur === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('theme', next);
+                applyIcons(next);
+            });
+        })();
+    </script>
 </body>
 </html>
