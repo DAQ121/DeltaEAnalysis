@@ -15,8 +15,9 @@ def analyze():
         image_data = data.get('image')
         threshold = data.get('threshold', 10)
         grid_size = data.get('grid_size', 10)
+        score_weights = data.get('score_weights')
 
-        result = analyze_image(image_data, threshold, grid_size)
+        result = analyze_image(image_data, threshold, grid_size, score_weights)
         return jsonify(result)
 
     except ImageProcessingError as e:
@@ -35,7 +36,8 @@ def stream_start():
         'source': source,
         'interval': float(data.get('interval', 5)),
         'threshold': float(data.get('threshold', 10)),
-        'grid_size': int(data.get('grid_size', 10))
+        'grid_size': int(data.get('grid_size', 10)),
+        'score_weights': data.get('score_weights')
     }
     session_id = start_session(config)
     return jsonify({'success': True, 'session_id': session_id})

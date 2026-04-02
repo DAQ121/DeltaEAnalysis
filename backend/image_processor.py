@@ -27,6 +27,15 @@ def encode_image(img):
     return base64.b64encode(buffer).decode('utf-8')
 
 
+DEFAULT_SCORE_WEIGHTS = {
+    'rectangularity': 0.04,
+    'vertex': 0.04,
+    'aspect': 0.16,
+    'size': 0.0,
+    'brightness': 0.76
+}
+
+
 def order_points(pts):
     """将4个角点排序为 [左上, 右上, 右下, 左下]，不受 boxPoints 旋转角度影响"""
     s = pts.sum(axis=1)
@@ -39,25 +48,27 @@ def order_points(pts):
     return ordered
 
 
-def _score_contour(contour, image_area):
+def _score_contour(contour, image_area, gray, weights=None):
     """
-    对轮廓按"矩形相似度"打分，用于从多个候选中选出最像试纸的矩形轮廓。
-    返回 (score, rect)，score ∈ [0, 1]，越高越像矩形。
-    不合格的轮廓返回 (0, None)。
+    对轮廓按"矩形相似度 + 亮度"打分，用于从多个候选中选出最像试纸的矩形轮廓。
+    返回 (score, rect, approx)，score ∈ [0, 1]，越高越像试纸。
+    不合格的轮廓返回 (0, None, None)。
     """
+    if weights is None:
+        weights = DEFAULT_SCORE_WEIGHTS
     area = cv2.contourArea(contour)
 
     # 硬过滤：太小（< 0.5% 图像面积）或太大（> 85%，可能是背景/光照）
     if area < image_area * 0.005:
-        return 0.0, None
+        return 0.0, None, None
     if area > image_area * 0.85:
-        return 0.0, None
+        return 0.0, None, None
 
     rect = cv2.minAreaRect(contour)
     rect_w, rect_h = rect[1]
     rect_area = rect_w * rect_h
     if rect_area < 1:
-        return 0.0, None
+        return 0.0, None, None
 
     # ① 矩形度：轮廓面积 / 最小外接矩形面积（矩形≈1.0，不规则光斑远小于1）
     rectangularity = area / rect_area
@@ -77,7 +88,7 @@ def _score_contour(contour, image_area):
 
     # ③ 长宽比：试纸通常为长条矩形
     if min(rect_w, rect_h) < 1:
-        return 0.0, None
+        return 0.0, None, None
     aspect = max(rect_w, rect_h) / min(rect_w, rect_h)
     if 1.5 <= aspect <= 10.0:
         aspect_score = 1.0
@@ -95,13 +106,20 @@ def _score_contour(contour, image_area):
     else:
         size_score = 0.2
 
-    # 加权综合评分
-    score = (0.40 * rectangularity +
-             0.30 * vertex_score +
-             0.15 * aspect_score +
-             0.15 * size_score)
+    # ⑤ 亮度：试纸通常为浅色，优先选择内部亮度较高的轮廓
+    contour_mask = np.zeros(gray.shape[:2], dtype=np.uint8)
+    cv2.drawContours(contour_mask, [contour], -1, 255, -1)
+    mean_brightness = cv2.mean(gray, mask=contour_mask)[0]
+    brightness_score = mean_brightness / 255.0
 
-    return score, rect
+    # 加权综合评分
+    score = (weights['rectangularity'] * rectangularity +
+             weights['vertex'] * vertex_score +
+             weights['aspect'] * aspect_score +
+             weights['size'] * size_score +
+             weights['brightness'] * brightness_score)
+
+    return score, rect, approx
 
 
 def _generate_candidates(gray, blurred):
@@ -147,7 +165,7 @@ def _generate_candidates(gray, blurred):
     return candidates
 
 
-def extract_roi(image):
+def extract_roi(image, score_weights=None):
     """步骤1: 提取ROI区域（多策略二值化 + 矩形度评分）"""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (7, 7), 0)
@@ -163,14 +181,16 @@ def extract_roi(image):
     best_score = 0
     best_contour = None
     best_rect = None
+    best_approx = None
     best_binary = None
 
     for contour, strategy_name, binary_img in candidates:
-        score, rect = _score_contour(contour, image_area)
+        score, rect, approx = _score_contour(contour, image_area, gray, score_weights)
         if score > best_score:
             best_score = score
             best_contour = contour
             best_rect = rect
+            best_approx = approx
             best_binary = binary_img
 
     MIN_SCORE_THRESHOLD = 0.3
@@ -179,18 +199,23 @@ def extract_roi(image):
             "未检测到矩形试纸区域，请确认图片中包含完整的试纸并避免强烈的光照不均"
         )
 
-    # Phase 3: 透视变换（与原逻辑一致）
+    # Phase 3: 透视变换
     binary = best_binary
     rect = best_rect
 
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
     cv2.drawContours(mask, [best_contour], -1, 255, -1)
 
-    box = cv2.boxPoints(rect)
-    box = np.int0(box)
+    # 优先用轮廓多边形近似的 4 顶点（紧贴轮廓），否则回退到 minAreaRect 外接矩形
+    if best_approx is not None and len(best_approx) == 4:
+        src_corner_pts = best_approx.reshape(4, 2).astype("float32")
+        ordered = order_points(src_corner_pts)
+    else:
+        box = cv2.boxPoints(rect)
+        ordered = order_points(box.astype("float32"))
 
-    # 用坐标和/差法排序角点，确保顺序不受旋转角度影响
-    ordered = order_points(box.astype("float32"))
+    # 用于可视化的外接矩形框
+    vis_box = np.int0(cv2.boxPoints(rect))
 
     # 从实际点距计算宽高，保持正确宽高比
     width = int(max(np.linalg.norm(ordered[1] - ordered[0]),
@@ -223,7 +248,7 @@ def extract_roi(image):
     roi[roi_mask == 0] = [255, 255, 255]
 
     contour_img = image.copy()
-    cv2.drawContours(contour_img, [box], 0, (0, 255, 0), 3)
+    cv2.drawContours(contour_img, [vis_box], 0, (0, 255, 0), 3)
 
     return {
         "roi_image": roi,
@@ -431,8 +456,8 @@ def calculate_delta_e_grid(roi_image, roi_mask, ref_lab, grid_data):
     }
 
 
-def detect_color_change(roi_image, delta_e_matrix, threshold, grid_data, mid_x=0):
-    """标注右侧超过阈值的网格（x >= mid_x），统计数量"""
+def detect_color_change(roi_image, delta_e_matrix, threshold, grid_data, mid_x=0, ref_side="left"):
+    """标注变色侧超过阈值的网格，统计数量。ref_side 为基准侧，统计另一侧。"""
     h, w = roi_image.shape[:2]
     cell_size = grid_data["cell_size"]
     grid_h, grid_w = grid_data["grid_size"]
@@ -443,8 +468,10 @@ def detect_color_change(roi_image, delta_e_matrix, threshold, grid_data, mid_x=0
     for i in range(grid_h):
         for j in range(grid_w):
             x1 = j * cell_size
-            # 只统计右侧网格
-            if x1 < mid_x:
+            # 基准是左侧 → 统计右侧（x >= mid_x）；基准是右侧 → 统计左侧（x < mid_x）
+            if ref_side == "left" and x1 < mid_x:
+                continue
+            if ref_side == "right" and x1 >= mid_x:
                 continue
             if delta_e_matrix[i, j] > threshold:
                 y1, y2 = i * cell_size, min((i + 1) * cell_size, h)
@@ -461,13 +488,13 @@ def detect_color_change(roi_image, delta_e_matrix, threshold, grid_data, mid_x=0
     }
 
 
-def analyze_image(image_data, threshold=10, grid_size=10):
+def analyze_image(image_data, threshold=10, grid_size=10, score_weights=None):
     """主分析函数"""
     try:
         image = decode_image(image_data)
 
         # 步骤1: ROI 提取
-        roi_data = extract_roi(image)
+        roi_data = extract_roi(image, score_weights)
 
         # 步骤2: 找黑洞，裁掉黑洞以上部分
         crop_data = find_hole_and_crop(roi_data["roi_image"], roi_data["roi_mask"])
@@ -479,18 +506,29 @@ def analyze_image(image_data, threshold=10, grid_size=10):
         left_lab = compute_mean_lab(split_data["left_img"], split_data["left_mask"])
         right_lab = compute_mean_lab(split_data["right_img"], split_data["right_mask"])
 
-        # 步骤4: 直接用右侧均值 LAB vs 左侧均值 LAB 算整体 ΔE
-        overall_delta_e = float(np.sqrt(np.sum((right_lab - left_lab) ** 2)))
+        # 自动判定基准侧：L 值更大（更亮）的一侧为基准色，另一侧为变色区域
+        if left_lab[0] >= right_lab[0]:
+            ref_lab = left_lab
+            test_lab = right_lab
+            ref_side = "left"
+        else:
+            ref_lab = right_lab
+            test_lab = left_lab
+            ref_side = "right"
 
-        # 步骤5: 对完整裁剪图划网格，右侧网格算 ΔE，分母为全部网格数
+        # 步骤4: 用基准 LAB vs 变色侧 LAB 算整体 ΔE
+        overall_delta_e = float(np.sqrt(np.sum((test_lab - ref_lab) ** 2)))
+
+        # 步骤5: 对完整裁剪图划网格，变色侧网格算 ΔE，分母为全部网格数
         full_grid_data = divide_into_grid(crop_data["cropped_image"], grid_size)
         mid_x = split_data["mid_x"]
         delta_e_data = calculate_delta_e_grid(
-            crop_data["cropped_image"], crop_data["cropped_mask"], left_lab, full_grid_data
+            crop_data["cropped_image"], crop_data["cropped_mask"], ref_lab, full_grid_data
         )
+        # 变色侧：如果基准是左侧，统计右侧网格（x >= mid_x）；反之统计左侧网格（x < mid_x）
         change_data = detect_color_change(
             crop_data["cropped_image"], delta_e_data["delta_e_matrix"],
-            threshold, full_grid_data, mid_x
+            threshold, full_grid_data, mid_x, ref_side
         )
 
         total_cells = full_grid_data["grid_size"][0] * full_grid_data["grid_size"][1]
@@ -523,14 +561,15 @@ def analyze_image(image_data, threshold=10, grid_size=10):
                 },
                 "step3_split": {
                     "title": "左右分割与色差计算",
-                    "description": "从中间分为左右两部分，分别计算平均 LAB，以左侧为基准计算整体 ΔE（CIE76）",
+                    "description": f"从中间分为左右两部分，自动以较亮侧（{'左' if ref_side == 'left' else '右'}侧）为基准计算整体 ΔE（CIE76）",
                     "images": {
                         "split_view": encode_image(split_data["split_vis"])
                     },
                     "data": {
                         "formula": "ΔE = √((L₂-L₁)² + (a₂-a₁)² + (b₂-b₁)²)",
-                        "left_lab": [round(v, 2) for v in left_lab.tolist()],
-                        "right_lab": [round(v, 2) for v in right_lab.tolist()],
+                        "ref_side": "左侧" if ref_side == "left" else "右侧",
+                        "ref_lab": [round(v, 2) for v in ref_lab.tolist()],
+                        "test_lab": [round(v, 2) for v in test_lab.tolist()],
                         "delta_e": round(overall_delta_e, 2)
                     }
                 },
@@ -551,8 +590,9 @@ def analyze_image(image_data, threshold=10, grid_size=10):
                 }
             },
             "final_results": {
-                "left_lab": [round(v, 2) for v in left_lab.tolist()],
-                "right_lab": [round(v, 2) for v in right_lab.tolist()],
+                "ref_side": "左侧" if ref_side == "left" else "右侧",
+                "ref_lab": [round(v, 2) for v in ref_lab.tolist()],
+                "test_lab": [round(v, 2) for v in test_lab.tolist()],
                 "overall_delta_e": round(overall_delta_e, 2),
                 "changed_cells": change_data["changed_cells"],
                 "total_cells": total_cells,

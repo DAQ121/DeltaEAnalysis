@@ -33,6 +33,29 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('s-threshold-value').textContent = e.target.value;
     });
 
+    // 视频流权重滑块实时显示
+    const sWeightSliders = [
+        { slider: 's-w-rect',   label: 's-w-rect-val' },
+        { slider: 's-w-vert',   label: 's-w-vert-val' },
+        { slider: 's-w-aspect', label: 's-w-aspect-val' },
+        { slider: 's-w-size',   label: 's-w-size-val' },
+        { slider: 's-w-bright', label: 's-w-bright-val' }
+    ];
+    sWeightSliders.forEach(({ slider, label }) => {
+        document.getElementById(slider).addEventListener('input', (e) => {
+            document.getElementById(label).textContent = e.target.value;
+        });
+    });
+
+    // 视频流权重折叠/展开
+    document.getElementById('s-weights-toggle').addEventListener('click', () => {
+        const group = document.getElementById('s-weights-group');
+        const arrow = document.getElementById('s-weights-arrow');
+        const open = group.style.display === 'none';
+        group.style.display = open ? 'block' : 'none';
+        arrow.textContent = open ? '\u25BC' : '\u25B6';
+    });
+
     document.getElementById('s-start-btn').addEventListener('click', startStream);
     document.getElementById('s-stop-btn').addEventListener('click', stopStream);
     document.getElementById('modal-close').addEventListener('click', closeModal);
@@ -54,7 +77,8 @@ async function startStream() {
         source,
         interval: parseFloat(document.getElementById('s-interval').value),
         threshold: parseFloat(document.getElementById('s-threshold').value),
-        grid_size: parseInt(document.getElementById('s-grid-size').value)
+        grid_size: parseInt(document.getElementById('s-grid-size').value),
+        score_weights: getScoreWeights('s-')
     };
 
     try {
@@ -342,14 +366,16 @@ function showModalStep(index) {
 
 function buildModalResultCards(r) {
     const fmtLab = arr => `L ${arr[0]}  a ${arr[1]}  b ${arr[2]}`;
+    const refLabel = r.ref_side || '左侧';
+    const testLabel = refLabel === '左侧' ? '右侧' : '左侧';
     document.getElementById('modal-result-cards').innerHTML = `
         <div class="result-card">
-            <div class="rc-header"><span class="rc-ch mono">L</span><span class="rc-label">左侧基准 LAB</span></div>
-            <div class="rc-value mono">${fmtLab(r.left_lab)}</div>
+            <div class="rc-header"><span class="rc-ch mono">L</span><span class="rc-label">${refLabel}基准 LAB</span></div>
+            <div class="rc-value mono">${fmtLab(r.ref_lab)}</div>
         </div>
         <div class="result-card">
-            <div class="rc-header"><span class="rc-ch mono rc-ch-r">R</span><span class="rc-label">右侧平均 LAB</span></div>
-            <div class="rc-value mono">${fmtLab(r.right_lab)}</div>
+            <div class="rc-header"><span class="rc-ch mono rc-ch-r">R</span><span class="rc-label">${testLabel}平均 LAB</span></div>
+            <div class="rc-value mono">${fmtLab(r.test_lab)}</div>
         </div>
         <div class="result-card result-card-accent">
             <div class="rc-header"><span class="rc-ch mono rc-ch-de">ΔE</span><span class="rc-label">整体色差</span></div>

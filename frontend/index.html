@@ -100,6 +100,35 @@
                         <div class="param-label"><span>网格大小</span></div>
                         <input type="number" class="number-input mono" id="grid-size" min="3" max="200" value="50" step="1">
                     </div>
+
+                    <div class="param-item">
+                        <div class="param-label param-label-toggle" id="weights-toggle">
+                            <span>ROI 评分权重</span>
+                            <span class="toggle-arrow" id="weights-arrow">&#9654;</span>
+                        </div>
+                        <div class="weights-group" id="weights-group" style="display:none;">
+                            <div class="weight-item">
+                                <div class="weight-label"><span>矩形度</span><span class="param-value-badge mono" id="w-rect-val">5</span></div>
+                                <input type="range" class="slider slider-sm" id="w-rect" min="0" max="100" value="5" step="5">
+                            </div>
+                            <div class="weight-item">
+                                <div class="weight-label"><span>顶点数</span><span class="param-value-badge mono" id="w-vert-val">5</span></div>
+                                <input type="range" class="slider slider-sm" id="w-vert" min="0" max="100" value="5" step="5">
+                            </div>
+                            <div class="weight-item">
+                                <div class="weight-label"><span>长宽比</span><span class="param-value-badge mono" id="w-aspect-val">20</span></div>
+                                <input type="range" class="slider slider-sm" id="w-aspect" min="0" max="100" value="20" step="1">
+                            </div>
+                            <div class="weight-item">
+                                <div class="weight-label"><span>面积占比</span><span class="param-value-badge mono" id="w-size-val">0</span></div>
+                                <input type="range" class="slider slider-sm" id="w-size" min="0" max="100" value="0" step="1">
+                            </div>
+                            <div class="weight-item">
+                                <div class="weight-label"><span>亮度</span><span class="param-value-badge mono" id="w-bright-val">95</span></div>
+                                <input type="range" class="slider slider-sm" id="w-bright" min="0" max="100" value="95" step="5">
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="panel-section">
@@ -175,14 +204,14 @@
                     <div class="result-card">
                         <div class="rc-header">
                             <span class="rc-ch mono">L</span>
-                            <span class="rc-label">左侧基准 LAB</span>
+                            <span class="rc-label" id="left-lab-label">基准 LAB</span>
                         </div>
                         <div class="rc-value mono" id="left-lab-value">—</div>
                     </div>
                     <div class="result-card">
                         <div class="rc-header">
                             <span class="rc-ch mono rc-ch-r">R</span>
-                            <span class="rc-label">右侧平均 LAB</span>
+                            <span class="rc-label" id="right-lab-label">变色侧 LAB</span>
                         </div>
                         <div class="rc-value mono" id="right-lab-value">—</div>
                     </div>
@@ -246,6 +275,35 @@
                     <div class="param-item">
                         <div class="param-label"><span>网格数</span></div>
                         <input type="number" class="number-input mono" id="s-grid-size" min="3" max="200" value="50" step="1">
+                    </div>
+
+                    <div class="param-item">
+                        <div class="param-label param-label-toggle" id="s-weights-toggle">
+                            <span>ROI 评分权重</span>
+                            <span class="toggle-arrow" id="s-weights-arrow">&#9654;</span>
+                        </div>
+                        <div class="weights-group" id="s-weights-group" style="display:none;">
+                            <div class="weight-item">
+                                <div class="weight-label"><span>矩形度</span><span class="param-value-badge mono" id="s-w-rect-val">5</span></div>
+                                <input type="range" class="slider slider-sm" id="s-w-rect" min="0" max="100" value="5" step="5">
+                            </div>
+                            <div class="weight-item">
+                                <div class="weight-label"><span>顶点数</span><span class="param-value-badge mono" id="s-w-vert-val">5</span></div>
+                                <input type="range" class="slider slider-sm" id="s-w-vert" min="0" max="100" value="5" step="5">
+                            </div>
+                            <div class="weight-item">
+                                <div class="weight-label"><span>长宽比</span><span class="param-value-badge mono" id="s-w-aspect-val">20</span></div>
+                                <input type="range" class="slider slider-sm" id="s-w-aspect" min="0" max="100" value="20" step="1">
+                            </div>
+                            <div class="weight-item">
+                                <div class="weight-label"><span>面积占比</span><span class="param-value-badge mono" id="s-w-size-val">0</span></div>
+                                <input type="range" class="slider slider-sm" id="s-w-size" min="0" max="100" value="0" step="1">
+                            </div>
+                            <div class="weight-item">
+                                <div class="weight-label"><span>亮度</span><span class="param-value-badge mono" id="s-w-bright-val">95</span></div>
+                                <input type="range" class="slider slider-sm" id="s-w-bright" min="0" max="100" value="95" step="5">
+                            </div>
+                        </div>
                     </div>
                 </div>
 

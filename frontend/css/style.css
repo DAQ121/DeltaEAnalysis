@@ -252,6 +252,26 @@ body {
     font-size: 10px; color: var(--text-3);
 }
 
+/* Weights toggle & group */
+.param-label-toggle {
+    cursor: pointer; user-select: none;
+}
+.param-label-toggle:hover { color: var(--amber); }
+.toggle-arrow {
+    font-size: 10px; color: var(--text-3); transition: color .15s;
+}
+.param-label-toggle:hover .toggle-arrow { color: var(--amber); }
+.weights-group {
+    padding: 8px 0 0 0;
+    display: flex; flex-direction: column; gap: 10px;
+}
+.weight-item { display: flex; flex-direction: column; gap: 4px; }
+.weight-label {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; color: var(--text-3);
+}
+.slider-sm { height: 2px; }
+
 .number-input, .text-input {
     width: 100%; padding: 8px 11px;
     background: var(--bg-3);

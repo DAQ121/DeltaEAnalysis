@@ -67,6 +67,29 @@ function initEventListeners() {
         document.getElementById('threshold-value').textContent = e.target.value;
     });
 
+    // 权重滑块实时显示
+    const weightSliders = [
+        { slider: 'w-rect',   label: 'w-rect-val' },
+        { slider: 'w-vert',   label: 'w-vert-val' },
+        { slider: 'w-aspect', label: 'w-aspect-val' },
+        { slider: 'w-size',   label: 'w-size-val' },
+        { slider: 'w-bright', label: 'w-bright-val' }
+    ];
+    weightSliders.forEach(({ slider, label }) => {
+        document.getElementById(slider).addEventListener('input', (e) => {
+            document.getElementById(label).textContent = e.target.value;
+        });
+    });
+
+    // 权重折叠/展开
+    document.getElementById('weights-toggle').addEventListener('click', () => {
+        const group = document.getElementById('weights-group');
+        const arrow = document.getElementById('weights-arrow');
+        const open = group.style.display === 'none';
+        group.style.display = open ? 'block' : 'none';
+        arrow.textContent = open ? '\u25BC' : '\u25B6';
+    });
+
     uploadArea.addEventListener('click', () => fileInput.click());
     previewBox.addEventListener('click', () => fileInput.click());
 
@@ -87,6 +110,21 @@ function initEventListeners() {
     });
 
     document.getElementById('analyze-btn').addEventListener('click', startAnalysis);
+}
+
+function getScoreWeights(prefix) {
+    const p = prefix || '';
+    const raw = {
+        rectangularity: parseInt(document.getElementById(p + 'w-rect').value),
+        vertex:         parseInt(document.getElementById(p + 'w-vert').value),
+        aspect:         parseInt(document.getElementById(p + 'w-aspect').value),
+        size:           parseInt(document.getElementById(p + 'w-size').value),
+        brightness:     parseInt(document.getElementById(p + 'w-bright').value)
+    };
+    const total = Object.values(raw).reduce((a, b) => a + b, 0) || 1;
+    const weights = {};
+    for (const k in raw) weights[k] = +(raw[k] / total).toFixed(4);
+    return weights;
 }
 
 function handleImageUpload(file) {
@@ -113,6 +151,7 @@ async function startAnalysis() {
 
     const threshold = parseInt(document.getElementById('threshold').value);
     const gridSize = parseInt(document.getElementById('grid-size').value);
+    const scoreWeights = getScoreWeights('');
 
     document.getElementById('loading').style.display = 'block';
     document.getElementById('analyze-btn').disabled = true;
@@ -125,7 +164,7 @@ async function startAnalysis() {
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: uploadedImage, threshold, grid_size: gridSize })
+            body: JSON.stringify({ image: uploadedImage, threshold, grid_size: gridSize, score_weights: scoreWeights })
         });
         const result = await response.json();
 
@@ -159,8 +198,10 @@ function displayResults(result) {
 function displayResultCards(r) {
     const fmtLab = (arr) =>
         `L ${arr[0]}  a ${arr[1]}  b ${arr[2]}`;
-    document.getElementById('left-lab-value').textContent = fmtLab(r.left_lab);
-    document.getElementById('right-lab-value').textContent = fmtLab(r.right_lab);
+    document.getElementById('left-lab-value').textContent = fmtLab(r.ref_lab);
+    document.getElementById('left-lab-label').textContent = `${r.ref_side}基准 LAB`;
+    document.getElementById('right-lab-value').textContent = fmtLab(r.test_lab);
+    document.getElementById('right-lab-label').textContent = r.ref_side === '左侧' ? '右侧平均 LAB' : '左侧平均 LAB';
     document.getElementById('delta-e-value').textContent = r.overall_delta_e.toFixed(2);
     document.getElementById('ratio-value').textContent = (r.color_change_ratio * 100).toFixed(1) + '%';
     document.getElementById('ratio-label').textContent =
@@ -254,10 +295,12 @@ function buildDataHtml(data) {
     // step3: LAB 均值 + 整体 ΔE
     if ('delta_e' in data && 'formula' in data) {
         const fmtLab = (arr) => `L ${arr[0]} / a ${arr[1]} / b ${arr[2]}`;
+        const refLabel = data.ref_side || '左侧';
+        const testLabel = refLabel === '左侧' ? '右侧' : '左侧';
         return `
             <div class="data-row"><span class="data-key">公式</span><span class="data-val highlight">${data.formula}</span></div>
-            <div class="data-row"><span class="data-key">左侧 LAB（基准）</span><span class="data-val highlight">${fmtLab(data.left_lab)}</span></div>
-            <div class="data-row"><span class="data-key">右侧 LAB</span><span class="data-val highlight">${fmtLab(data.right_lab)}</span></div>
+            <div class="data-row"><span class="data-key">${refLabel} LAB（基准）</span><span class="data-val highlight">${fmtLab(data.ref_lab)}</span></div>
+            <div class="data-row"><span class="data-key">${testLabel} LAB（变色侧）</span><span class="data-val highlight">${fmtLab(data.test_lab)}</span></div>
             <div class="data-row"><span class="data-key">整体 ΔE</span><span class="data-val" style="font-size:1.4em;color:var(--orange)">${data.delta_e}</span></div>`;
     }
 

@@ -79,7 +79,7 @@ def _capture_loop(session_id):
         frame_b64 = 'data:image/jpeg;base64,' + base64.b64encode(buf).decode('utf-8')
 
         try:
-            analysis = analyze_image(frame_b64, config['threshold'], config['grid_size'])
+            analysis = analyze_image(frame_b64, config['threshold'], config['grid_size'], config.get('score_weights'))
         except Exception as e:
             q.put({'type': 'frame_error', 'frame_index': frame_index,
                    'capture_time': capture_time, 'message': str(e)})
