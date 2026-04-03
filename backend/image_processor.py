@@ -142,7 +142,7 @@ def _generate_candidates(gray, blurred):
     kernel_close = np.ones((5, 5), np.uint8)
     for bin_img in [adaptive_binary, adaptive_inv]:
         closed = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel_close)
-        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         for c in contours:
             candidates.append((c, "adaptive", closed))
 
@@ -150,7 +150,7 @@ def _generate_candidates(gray, blurred):
     edges = cv2.Canny(blurred, 30, 100)
     kernel_canny = np.ones((5, 5), np.uint8)
     edges_closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel_canny)
-    contours, _ = cv2.findContours(edges_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(edges_closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     for c in contours:
         candidates.append((c, "canny", edges_closed))
 
@@ -158,7 +158,7 @@ def _generate_candidates(gray, blurred):
     _, otsu_binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     kernel_otsu = np.ones((3, 3), np.uint8)
     otsu_closed = cv2.morphologyEx(otsu_binary, cv2.MORPH_CLOSE, kernel_otsu)
-    contours, _ = cv2.findContours(otsu_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(otsu_closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     for c in contours:
         candidates.append((c, "otsu", otsu_closed))
 
