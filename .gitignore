@@ -26,3 +26,6 @@ static/uploads/*
 # Media / binary
 mediamtx/
 *.mp4
+
+# Superpowers brainstorming sessions
+.superpowers/
