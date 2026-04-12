@@ -26,12 +26,13 @@ python3 -m http.server 8080       # http://localhost:8080
 
 ### 后端（Flask + OpenCV）
 
-**app.py** — Flask 入口，三组 API：
+**app.py** — Flask 入口，四组 API：
 - `/api/analyze` POST — 单张图片分析（接收 base64 图片，返回分步结果 + 最终色差数据）
   - 参数：`image`(base64)、`threshold`(默认10)、`grid_size`(默认10)、`score_weights`(可选，归一化权重字典)
 - `/api/stream/start` POST、`/api/stream/stop/<id>` POST、`/api/stream/events/<id>` GET (SSE)、`/api/stream/frame/<id>/<index>` GET — 视频流检测
-  - start 参数：`source`、`interval`(秒)、`threshold`、`grid_size`、`score_weights`
+  - start 参数：`source_type`(`opencv`/`hikvision`/`mock`)、`source`(opencv模式)、`source_config`(hikvision/mock模式)、`interval`(秒)、`threshold`、`grid_size`、`score_weights`
 - `/api/stream/video/<session_id>` GET — MJPEG 实时预览流
+- `/api/camera/devices` GET — 枚举网络中可用的海康 GigE Vision 相机
 
 **image_processor.py** — 核心图像处理流水线，5 个步骤：
 1. `extract_roi()` — 多策略二值化 + 矩形度评分选取最佳轮廓 + 透视变换提取 ROI
@@ -41,10 +42,17 @@ python3 -m http.server 8080       # http://localhost:8080
 5. `detect_color_change()` — 标记超过阈值的网格，仅统计右侧网格
 
 **stream_processor.py** — 双线程视频流处理：
-- `_video_read_loop()` — 持续以 ~30fps 读取帧，更新 `latest_frame`
+- `_create_source()` — 根据 `source_type` 创建对应的 `BaseCameraSource` 实例（`opencv`/`hikvision`/`mock`）
+- `_video_read_loop()` — 持续调用 `source.read_frame()` 更新 `latest_frame`
 - `_capture_loop()` — 按配置间隔抓帧，调用 `analyze_image()` 进行色差分析
 - 用 `threading.Lock` 同步两个线程对帧的读写
-- 本地视频文件读到末尾后循环播放；也支持 RTSP 流
+
+**camera/** — 相机适配层模块：
+- `camera/base.py` — `BaseCameraSource` 抽象基类，定义 `open()/read_frame()/close()/is_opened()` 接口
+- `camera/opencv_source.py` — 基于 `cv2.VideoCapture` 的视频源，支持本地文件（循环播放）和 RTSP URL
+- `camera/hikvision_source.py` — 海康 MVS SDK 集成（GigE Vision），软触发模式抓图；SDK 未安装时优雅降级
+- `camera/mock_source.py` — 从 `mediamtx/test-img/` 循环读取图片模拟相机，支持配置图片切换间隔
+- `camera/MvImport/` — 从 MVS 安装目录复制的 SDK Python 封装文件（不提交到 Git）
 
 ### 核心算法
 

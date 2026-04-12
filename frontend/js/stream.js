@@ -22,9 +22,13 @@ function setGlobalStatus(state, text) {
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-selected', 'false');
+            });
             document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
             btn.classList.add('active');
+            btn.setAttribute('aria-selected', 'true');
             document.getElementById('tab-' + btn.dataset.tab).style.display = 'flex';
         });
     });
@@ -56,6 +60,10 @@ document.addEventListener('DOMContentLoaded', () => {
         arrow.textContent = open ? '\u25BC' : '\u25B6';
     });
 
+    // 视频源类型切换
+    document.getElementById('s-source-type').addEventListener('change', onSourceTypeChange);
+    document.getElementById('s-refresh-devices').addEventListener('click', refreshDevices);
+
     document.getElementById('s-start-btn').addEventListener('click', startStream);
     document.getElementById('s-stop-btn').addEventListener('click', stopStream);
     document.getElementById('modal-close').addEventListener('click', closeModal);
@@ -68,18 +76,73 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// ===== 视频源类型切换 =====
+function onSourceTypeChange() {
+    const type = document.getElementById('s-source-type').value;
+    document.getElementById('s-source-opencv-group').style.display = type === 'opencv' ? '' : 'none';
+    document.getElementById('s-source-hik-group').style.display = type === 'hikvision' ? '' : 'none';
+    document.getElementById('s-source-mock-group').style.display = type === 'mock' ? '' : 'none';
+}
+
+async function refreshDevices() {
+    const btn = document.getElementById('s-refresh-devices');
+    const select = document.getElementById('s-device-index');
+    btn.disabled = true;
+    btn.textContent = '扫描中...';
+    try {
+        const res = await fetch(`${STREAM_API.replace('/api/stream', '/api/camera/devices')}`);
+        const data = await res.json();
+        select.innerHTML = '';
+        if (!data.sdk_available) {
+            select.innerHTML = '<option value="0">MVS SDK 未安装</option>';
+            showToast(data.message || 'MVS SDK 未安装', 'warning');
+        } else if (data.devices.length === 0) {
+            select.innerHTML = '<option value="0">未发现相机设备</option>';
+            showToast('未发现海康相机，请检查网络连接', 'warning');
+        } else {
+            data.devices.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d.index;
+                opt.textContent = `#${d.index} ${d.name} (${d.ip}) ${d.model}`;
+                select.appendChild(opt);
+            });
+            showToast(`发现 ${data.devices.length} 台相机`, 'success');
+        }
+    } catch (e) {
+        select.innerHTML = '<option value="0">查询失败</option>';
+        showToast('设备枚举失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '刷新';
+    }
+}
+
 // ===== 启动检测 =====
 async function startStream() {
-    const source = document.getElementById('s-source').value.trim();
-    if (!source) { showToast('请填写视频源路径或 RTSP 地址', 'warning'); return; }
+    const sourceType = document.getElementById('s-source-type').value;
 
     const config = {
-        source,
+        source_type: sourceType,
         interval: parseFloat(document.getElementById('s-interval').value),
         threshold: parseFloat(document.getElementById('s-threshold').value),
         grid_size: parseInt(document.getElementById('s-grid-size').value),
         score_weights: getScoreWeights('s-')
     };
+
+    if (sourceType === 'opencv') {
+        const source = document.getElementById('s-source').value.trim();
+        if (!source) { showToast('请填写视频源路径或 RTSP 地址', 'warning'); return; }
+        config.source = source;
+    } else if (sourceType === 'hikvision') {
+        config.source_config = {
+            device_index: parseInt(document.getElementById('s-device-index').value),
+            exposure_time: parseFloat(document.getElementById('s-exposure-time').value)
+        };
+    } else if (sourceType === 'mock') {
+        config.source_config = {
+            frame_interval: parseFloat(document.getElementById('s-mock-frame-interval').value)
+        };
+    }
 
     try {
         const res = await fetch(`${STREAM_API}/start`, {

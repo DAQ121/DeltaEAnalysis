@@ -6,13 +6,16 @@
 
 ## 核心功能
 
-- ✅ 自动ROI提取与角度校正
-- ✅ CLAHE光照校正 + K-means聚类智能参考色提取
-- ✅ 像素级色差计算（CIE76标准）
-- ✅ 自适应网格划分与热力图可视化
-- ✅ 自动填充黑洞和ROI边缘区域
-- ✅ 支持手动指定LAB参考值
-- ✅ 可配置填充黑洞开关
+- 自动ROI提取与角度校正
+- CIE76 标准色差计算（ΔE）
+- 自适应网格划分与热力图可视化
+- 单张图片上传分析
+- 视频流实时检测（支持三种视频源）
+  - 视频文件 / RTSP 流
+  - 海康工业相机（MVS SDK，GigE Vision）
+  - 模拟相机（测试图片循环）
+- 海康相机设备自动枚举
+- ROI 评分权重可配置
 
 ## 快速启动
 
@@ -96,17 +99,37 @@ shijuedemo/
 ├── backend/
 │   ├── app.py                    # Flask主程序（端口5002）
 │   ├── image_processor.py        # 图像处理核心逻辑
+│   ├── stream_processor.py       # 视频流处理（双线程架构）
+│   ├── camera/                   # 相机适配层
+│   │   ├── base.py               # BaseCameraSource 抽象基类
+│   │   ├── opencv_source.py      # OpenCV 视频源（文件/RTSP）
+│   │   ├── hikvision_source.py   # 海康 MVS SDK 集成
+│   │   ├── mock_source.py        # 模拟相机（测试用）
+│   │   └── MvImport/             # MVS SDK Python 封装（需手动复制）
 │   └── requirements.txt          # Python依赖
 ├── frontend/
 │   ├── index.html               # 主页面
 │   ├── css/style.css            # 样式文件
-│   └── js/main.js               # 前端逻辑
+│   ├── js/main.js               # 单图分析逻辑
+│   └── js/stream.js             # 视频流检测逻辑
+├── mediamtx/
+│   └── test-img/                # 测试用试纸图片
+├── docs/                        # 设计文档
+├── 使用手册.md                   # 使用手册
 ├── 试纸色差检测技术方案.md        # 技术方案文档
 ├── Web_Demo设计方案.md           # 设计方案文档
 └── README.md                    # 项目说明
 ```
 
 ## 更新日志
+
+### v3.0 (2026-04-11)
+- 新增相机适配层（BaseCameraSource 抽象基类）
+- 集成海康 MVS SDK，支持 GigE Vision 工业相机接入
+- 新增模拟相机模式（测试图片循环，可配置切换间隔）
+- 新增设备枚举 API（`/api/camera/devices`）
+- 前端视频源类型可切换（海康相机 / 视频文件 / 模拟相机）
+- 跨平台支持（Windows + Linux）
 
 ### v2.0 (2026-03-28)
 - ✅ 优化参考色提取：CLAHE增强 + K-means聚类

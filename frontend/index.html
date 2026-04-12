@@ -47,7 +47,7 @@
                         <span class="status-indicator idle" id="global-status-dot"></span>
                         <span class="status-label mono" id="global-status-text">待机</span>
                     </div>
-                    <button class="theme-toggle" id="theme-toggle" title="切换主题">
+                    <button class="theme-toggle" id="theme-toggle" title="切换主题" aria-label="切换深色/浅色主题">
                         <svg class="theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
                         </svg>
@@ -61,12 +61,12 @@
         </header>
 
         <!-- Tab Bar -->
-        <div class="tab-bar">
-            <button class="tab-btn active" data-tab="single">
+        <div class="tab-bar" role="tablist">
+            <button class="tab-btn active" data-tab="single" role="tab" aria-selected="true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                 单图分析
             </button>
-            <button class="tab-btn" data-tab="stream">
+            <button class="tab-btn" data-tab="stream" role="tab" aria-selected="false">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 视频流检测
             </button>
@@ -74,7 +74,7 @@
         </div>
 
         <!-- Tab: 单图分析 -->
-        <div class="tab-panel" id="tab-single">
+        <div class="tab-panel" id="tab-single" role="tabpanel">
         <main class="app-main">
 
             <!-- Left Panel -->
@@ -237,7 +237,7 @@
         </div>
 
         <!-- Tab: 视频流检测 -->
-        <div class="tab-panel" id="tab-stream" style="display:none;">
+        <div class="tab-panel" id="tab-stream" style="display:none;" role="tabpanel">
         <main class="app-main">
 
             <!-- Left Panel -->
@@ -248,8 +248,40 @@
                         视频源配置
                     </div>
                     <div class="param-item">
+                        <div class="param-label"><span>视频源类型</span></div>
+                        <select class="text-input mono" id="s-source-type">
+                            <option value="opencv">视频文件 / RTSP</option>
+                            <option value="hikvision">海康工业相机</option>
+                            <option value="mock">模拟相机（测试）</option>
+                        </select>
+                    </div>
+                    <!-- OpenCV 模式：URL/路径输入 -->
+                    <div class="param-item" id="s-source-opencv-group">
                         <div class="param-label"><span>视频源 / RTSP 地址</span></div>
                         <input type="text" class="text-input mono" id="s-source" placeholder="rtsp://... 或本地路径">
+                    </div>
+                    <!-- 海康相机模式：设备选择 + 曝光时间 -->
+                    <div id="s-source-hik-group" style="display:none;">
+                        <div class="param-item">
+                            <div class="param-label">
+                                <span>相机设备</span>
+                                <button class="refresh-btn mono" id="s-refresh-devices" title="刷新设备列表">刷新</button>
+                            </div>
+                            <select class="text-input mono" id="s-device-index">
+                                <option value="0">点击"刷新"扫描设备</option>
+                            </select>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label"><span>曝光时间（μs）</span></div>
+                            <input type="number" class="number-input mono" id="s-exposure-time" min="100" max="1000000" value="10000" step="100">
+                        </div>
+                    </div>
+                    <!-- Mock 模式：图片切换间隔 -->
+                    <div id="s-source-mock-group" style="display:none;">
+                        <div class="param-item">
+                            <div class="param-label"><span>图片切换间隔（秒）</span></div>
+                            <input type="number" class="number-input mono" id="s-mock-frame-interval" min="0.1" max="60" value="1" step="0.1">
+                        </div>
                     </div>
                     <div class="param-item">
                         <div class="param-label"><span>抓拍间隔（秒）</span></div>
@@ -380,7 +412,7 @@
             <div class="modal-container modal-sm">
                 <div class="modal-header">
                     <div class="modal-title mono">结果数据</div>
-                    <button class="modal-close" id="result-modal-close">✕</button>
+                    <button class="modal-close" id="result-modal-close" aria-label="关闭">✕</button>
                 </div>
                 <div class="modal-body-simple">
                     <pre class="result-json mono" id="result-json-content"></pre>
@@ -393,7 +425,7 @@
             <div class="modal-container">
                 <div class="modal-header">
                     <div class="modal-title mono" id="modal-title">帧详情</div>
-                    <button class="modal-close" id="modal-close">✕</button>
+                    <button class="modal-close" id="modal-close" aria-label="关闭">✕</button>
                 </div>
                 <div class="modal-body">
                     <div class="steps-section" style="flex:1;min-height:0;">
@@ -408,7 +440,7 @@
     </div>
 
     <!-- Toast Container -->
-    <div id="toast-container"></div>
+    <div id="toast-container" role="status" aria-live="polite"></div>
 
     <script src="js/main.js"></script>
     <script src="js/stream.js"></script>

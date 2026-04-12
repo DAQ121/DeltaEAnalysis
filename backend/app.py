@@ -29,17 +29,34 @@ def analyze():
 @app.route('/api/stream/start', methods=['POST'])
 def stream_start():
     data = request.json
-    source = data.get('source', '').strip()
-    if not source:
-        return jsonify({'success': False, 'error': '视频源不能为空'}), 400
+    source_type = data.get('source_type', 'opencv')
+
+    # 构建 config
     config = {
-        'source': source,
+        'source_type': source_type,
         'interval': float(data.get('interval', 5)),
         'threshold': float(data.get('threshold', 10)),
         'grid_size': int(data.get('grid_size', 10)),
-        'score_weights': data.get('score_weights')
+        'score_weights': data.get('score_weights'),
     }
-    session_id = start_session(config)
+
+    if source_type == 'opencv':
+        source = data.get('source', '').strip()
+        if not source:
+            return jsonify({'success': False, 'error': '视频源不能为空'}), 400
+        config['source'] = source
+    elif source_type == 'hikvision':
+        config['source_config'] = data.get('source_config', {})
+    elif source_type == 'mock':
+        config['source_config'] = data.get('source_config', {})
+    else:
+        return jsonify({'success': False, 'error': f'不支持的源类型: {source_type}'}), 400
+
+    try:
+        session_id = start_session(config)
+    except RuntimeError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
     return jsonify({'success': True, 'session_id': session_id})
 
 
@@ -90,6 +107,23 @@ def stream_video(session_id):
         return jsonify({'error': 'Session not found'}), 404
     return Response(generate_preview_stream(session_id),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/api/camera/devices')
+def camera_devices():
+    """枚举网络中可用的海康 GigE Vision 相机"""
+    try:
+        from camera.hikvision_source import is_sdk_available, enumerate_devices
+    except ImportError:
+        return jsonify({'success': True, 'devices': [], 'sdk_available': False,
+                        'message': 'MVS SDK 未安装'})
+
+    if not is_sdk_available():
+        return jsonify({'success': True, 'devices': [], 'sdk_available': False,
+                        'message': 'MVS SDK 未安装，请先安装海康 MVS 客户端'})
+
+    devices = enumerate_devices()
+    return jsonify({'success': True, 'devices': devices, 'sdk_available': True})
 
 
 if __name__ == '__main__':

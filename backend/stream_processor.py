@@ -6,9 +6,41 @@ import queue
 import uuid
 
 from image_processor import analyze_image
+from camera import OpenCVSource, MockCameraSource
 
-# { session_id: { config, status, start_time, frames, queue, thread, latest_frame, frame_lock } }
+# HikVisionSource 仅在 SDK 可用时导入
+try:
+    from camera import HikVisionSource
+except ImportError:
+    HikVisionSource = None
+
+# { session_id: { config, status, start_time, frames, queue, thread, source, latest_frame, frame_lock } }
 sessions = {}
+
+
+def _create_source(config):
+    """根据 config['source_type'] 创建对应的相机源实例"""
+    source_type = config.get('source_type', 'opencv')
+    source_config = config.get('source_config', {})
+
+    if source_type == 'hikvision':
+        if HikVisionSource is None:
+            raise RuntimeError("MVS SDK 未安装，无法使用海康相机模式")
+        try:
+            return HikVisionSource(
+                device_index=source_config.get('device_index', 0),
+                exposure_time=source_config.get('exposure_time', 10000),
+            )
+        except ImportError as e:
+            raise RuntimeError(str(e))
+    elif source_type == 'mock':
+        image_dir = source_config.get('image_dir')
+        frame_interval = source_config.get('frame_interval', 1.0)
+        return MockCameraSource(image_dir=image_dir, frame_interval=frame_interval)
+    else:
+        # opencv 模式：本地文件或 RTSP
+        source = config.get('source', '')
+        return OpenCVSource(source)
 
 
 def _make_thumbnail(frame, width=200):
@@ -20,27 +52,23 @@ def _make_thumbnail(frame, width=200):
 
 
 def _video_read_loop(session_id):
-    """持续读取视频帧，更新 latest_frame，供预览流和分析使用"""
+    """持续读取帧，更新 latest_frame，供预览流和分析使用"""
     session = sessions[session_id]
-    config = session['config']
-    cap = cv2.VideoCapture(config['source'])
+    source = session['source']
 
-    if not cap.isOpened():
-        session['cap_opened'] = False
+    if not source.open():
+        session['source_opened'] = False
         return
 
-    session['cap_opened'] = True
+    session['source_opened'] = True
     while session['status'] == 'running':
-        ret, frame = cap.read()
-        if not ret:
-            # 本地视频读到末尾，循环播放
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        frame = source.read_frame()
+        if frame is None:
+            time.sleep(0.1)
             continue
         with session['frame_lock']:
             session['latest_frame'] = frame
         time.sleep(0.033)  # ~30fps
-
-    cap.release()
 
 
 def _capture_loop(session_id):
@@ -49,14 +77,14 @@ def _capture_loop(session_id):
     config = session['config']
     q = session['queue']
 
-    # 等待视频读取线程打开视频源（最多5秒）
+    # 等待视频源打开（最多5秒）
     for _ in range(50):
-        if session['cap_opened'] is not None:
+        if session['source_opened'] is not None:
             break
         time.sleep(0.1)
 
-    if not session.get('cap_opened'):
-        q.put({'type': 'error', 'message': '无法打开视频源，请检查路径或 RTSP 地址'})
+    if not session.get('source_opened'):
+        q.put({'type': 'error', 'message': '无法打开视频源，请检查配置'})
         session['status'] = 'error'
         return
 
@@ -131,16 +159,20 @@ def _capture_loop(session_id):
 
 def start_session(config):
     session_id = str(uuid.uuid4())[:8]
+
+    source = _create_source(config)
+
     sessions[session_id] = {
         'config': config,
         'status': 'running',
         'start_time': None,
         'frames': [],
         'queue': queue.Queue(),
+        'source': source,
         'latest_frame': None,
         'frame_lock': threading.Lock(),
         'thread': None,
-        'cap_opened': None  # None=未知, True=成功, False=失败
+        'source_opened': None  # None=未知, True=成功, False=失败
     }
 
     t_read = threading.Thread(target=_video_read_loop, args=(session_id,), daemon=True)
@@ -154,6 +186,9 @@ def start_session(config):
 def stop_session(session_id):
     if session_id in sessions:
         sessions[session_id]['status'] = 'stopped'
+        source = sessions[session_id].get('source')
+        if source:
+            source.close()
 
 
 def get_frame_detail(session_id, frame_index):
